@@ -9,7 +9,7 @@ agent:
     - watch 모드로 복구 진행 상황 모니터링
 inputs:
   namespace: { type: string, default: "default", description: "K8s 네임스페이스" }
-  pod_prefix: { type: string, description: "복구할 파드 이름 접두사 (예: soom-api, nginx)" }
+  pod_prefix: { type: string, description: "복구할 파드 이름 접두사 (예: my-api, nginx)" }
 ---
 
 # Kubernetes 파드 복구: {{pod_prefix}} ({{namespace}})

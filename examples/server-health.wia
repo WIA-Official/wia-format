@@ -24,7 +24,7 @@ free | awk 'NR==2{printf "%d%%", $3/$2*100}'
 ## 3. PM2 서비스 상태
 
 ```verify expect=0
-pm2 pid soom-api > /dev/null 2>&1
+pm2 pid my-api > /dev/null 2>&1
 ```
 
 ## 4. PM2 전체 목록
