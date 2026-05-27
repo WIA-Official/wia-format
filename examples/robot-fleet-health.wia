@@ -1,0 +1,195 @@
+---
+wia: "1"
+title: 로봇 플릿 건강 점검
+agent:
+  role: Soomy (로봇 플릿 운영 AI)
+  rules:
+    - 임계값 초과 로봇은 즉시 알림
+    - 배터리 20% 이하는 Critical 처리
+    - CPU 온도 80°C 이상은 즉시 운행 중단 권고
+inputs:
+  fleet_name: { type: string, description: "플릿 이름 (예: warehouse-floor-1)" }
+  alert_threshold: { type: number, default: 80, description: "경고 임계값 (%)" }
+  fleet_hosts: { type: string, default: "robot1 robot2 robot3 robot4 robot5", description: "로봇 호스트명 목록 (스페이스 구분)" }
+---
+
+# 로봇 플릿 건강 점검: {{fleet_name}}
+
+> src: https://docs.ros.org/en/humble/Tutorials.html
+> src: https://navigation.ros.org/
+
+## 1. 플릿 점검 시작
+
+```sh run timeout=10
+echo "=================================" && \
+echo "  플릿 건강 점검: {{fleet_name}}" && \
+echo "  시간: $(date '+%Y-%m-%d %H:%M:%S KST')" && \
+echo "  임계값: {{alert_threshold}}%" && \
+echo "  대상 로봇: {{fleet_hosts}}" && \
+echo "================================="
+```
+
+## 2. 로봇 네트워크 연결 상태
+
+```sh run timeout=30
+echo "=== 플릿 연결 상태 ===" && \
+ONLINE=0; OFFLINE=0
+for HOST in {{fleet_hosts}}; do
+  if ssh -o ConnectTimeout=4 ubuntu@${HOST} "echo ok" > /dev/null 2>&1; then
+    printf "✓ %-20s ONLINE\n" "$HOST"
+    ONLINE=$((ONLINE + 1))
+  else
+    printf "✗ %-20s OFFLINE\n" "$HOST"
+    OFFLINE=$((OFFLINE + 1))
+  fi
+done
+echo ""
+echo "온라인: ${ONLINE}대 / 오프라인: ${OFFLINE}대"
+```
+
+## 3. 배터리 잔량 점검
+
+```sh run timeout=30
+echo "=== 배터리 잔량 ===" && \
+for HOST in {{fleet_hosts}}; do
+  BATTERY=$(ssh -o ConnectTimeout=4 ubuntu@${HOST} \
+    "source /opt/ros/humble/setup.bash 2>/dev/null; \
+     # ROS 배터리 토픽 조회 (없으면 시스템 배터리)
+     timeout 2 ros2 topic echo /battery_state --once 2>/dev/null | \
+       grep percentage | awk '{printf \"%.0f%%\", \$2*100}' 2>/dev/null || \
+     cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1 | awk '{print \$1\"%\"}' || \
+     echo 'N/A'" 2>/dev/null)
+  PVAL=$(echo "$BATTERY" | tr -d '%')
+  if [ -n "$PVAL" ] && [ "$PVAL" != "N/A" ] && [ "$PVAL" -lt 20 ] 2>/dev/null; then
+    printf "⚠️  %-20s 배터리: %s  [CRITICAL - 충전 필요]\n" "$HOST" "$BATTERY"
+  else
+    printf "   %-20s 배터리: %s\n" "$HOST" "$BATTERY"
+  fi
+done
+```
+
+## 4. CPU 온도 점검
+
+```sh run timeout=30
+echo "=== CPU 온도 ===" && \
+for HOST in {{fleet_hosts}}; do
+  TEMP=$(ssh -o ConnectTimeout=4 ubuntu@${HOST} \
+    "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | \
+     awk '{printf \"%.1f\", \$1/1000}' || \
+     sensors 2>/dev/null | grep 'Core 0' | awk '{print \$3}' | tr -d '+°C' | head -1 || \
+     echo 'N/A'" 2>/dev/null)
+  TVAL=$(echo "$TEMP" | cut -d. -f1)
+  if [ -n "$TVAL" ] && [ "$TVAL" != "N/A" ] && [ "$TVAL" -ge 80 ] 2>/dev/null; then
+    printf "🔥  %-20s 온도: %s°C  [CRITICAL - 과열!]\n" "$HOST" "$TEMP"
+  elif [ -n "$TVAL" ] && [ "$TVAL" != "N/A" ] && [ "$TVAL" -ge {{alert_threshold}} ] 2>/dev/null; then
+    printf "⚠️  %-20s 온도: %s°C  [WARN]\n" "$HOST" "$TEMP"
+  else
+    printf "   %-20s 온도: %s°C\n" "$HOST" "$TEMP"
+  fi
+done
+```
+
+## 5. ROS 핵심 노드 상태
+
+```sh run timeout=40
+echo "=== ROS 노드 상태 ===" && \
+for HOST in {{fleet_hosts}}; do
+  NODE_COUNT=$(ssh -o ConnectTimeout=4 ubuntu@${HOST} \
+    "source /opt/ros/humble/setup.bash 2>/dev/null; \
+     source ~/robot_ws/install/setup.bash 2>/dev/null; \
+     ros2 node list 2>/dev/null | wc -l" 2>/dev/null)
+  CRITICAL=$(ssh -o ConnectTimeout=4 ubuntu@${HOST} \
+    "source /opt/ros/humble/setup.bash 2>/dev/null; \
+     source ~/robot_ws/install/setup.bash 2>/dev/null; \
+     ros2 node list 2>/dev/null | grep -cE 'nav|amcl|robot_state|locali' || echo 0" 2>/dev/null)
+  if [ "${NODE_COUNT:-0}" -eq 0 ]; then
+    printf "✗  %-20s ROS 노드: 없음 [DOWN]\n" "$HOST"
+  else
+    printf "   %-20s ROS 노드: %s개 (핵심: %s개)\n" "$HOST" "${NODE_COUNT:-?}" "${CRITICAL:-?}"
+  fi
+done
+```
+
+## 6. 임계값 초과 로봇 감지
+
+```verify expect=0 timeout=40
+# alert_threshold 이상의 CPU 사용률을 가진 로봇 감지
+ALERT_COUNT=0
+for HOST in {{fleet_hosts}}; do
+  CPU_USAGE=$(ssh -o ConnectTimeout=4 ubuntu@${HOST} \
+    "top -bn1 | grep 'Cpu(s)' | awk '{print 100-int(\$8)}'" 2>/dev/null)
+  if [ -n "$CPU_USAGE" ] && [ "$CPU_USAGE" -ge {{alert_threshold}} ] 2>/dev/null; then
+    echo "ALERT: $HOST CPU ${CPU_USAGE}% >= {{alert_threshold}}%"
+    ALERT_COUNT=$((ALERT_COUNT + 1))
+  fi
+done
+echo "임계값({{alert_threshold}}%) 초과 로봇: ${ALERT_COUNT}대"
+[ "$ALERT_COUNT" -eq 0 ]
+```
+
+## 7. 예측 정비 필요 여부 분석
+
+```sh run timeout=40
+echo "=== 정비 예측 데이터 ===" && \
+for HOST in {{fleet_hosts}}; do
+  # 업타임, 재부팅 이력, 에러 카운트
+  INFO=$(ssh -o ConnectTimeout=4 ubuntu@${HOST} \
+    "UPTIME=\$(uptime -p 2>/dev/null || uptime)
+     ERR_COUNT=\$(journalctl -p err --since '24h ago' 2>/dev/null | wc -l || echo '?')
+     DISK=\$(df / 2>/dev/null | awk 'NR==2{print \$5}')
+     echo \"업타임:\$UPTIME | 에러(24h):\${ERR_COUNT}건 | 디스크:\$DISK\"" 2>/dev/null || \
+    echo "데이터 수집 실패")
+  printf "   %-20s %s\n" "$HOST" "$INFO"
+done
+```
+
+## 8. AI 플릿 건강 분석 및 정비 예측
+
+```ai model=gpt-4o
+로봇 플릿 건강 점검 결과 — {{fleet_name}}
+
+점검 시간: 현재
+임계값: {{alert_threshold}}%
+대상: {{fleet_hosts}}
+
+수집된 데이터:
+{{$prev}}
+
+한국어로 다음을 분석해주세요:
+
+## 플릿 건강 점수
+(0-100점, 각 로봇별 + 전체 평균)
+
+## 즉시 조치 필요 로봇
+(Critical 상태: 배터리 20% 이하, 온도 80°C+, ROS 다운)
+
+## 예측 정비 필요 로봇
+(1주일 내 정비 권장)
+
+## 플릿 효율 최적화 제안
+(로봇 배치, 충전 스케줄, 작업 재분배 등)
+```
+
+## 9. 경고 상태 로봇 알림
+
+```sh run if={{$prev}}=alert timeout=10
+# 심각한 이상 감지 시 알림 기록
+ALERT_FILE="/tmp/fleet-alert-$(date +%Y%m%d_%H%M%S).txt"
+echo "=== 플릿 경고 알림 ===" > "$ALERT_FILE"
+echo "플릿: {{fleet_name}}" >> "$ALERT_FILE"
+echo "시간: $(date '+%Y-%m-%d %H:%M:%S KST')" >> "$ALERT_FILE"
+echo "임계값: {{alert_threshold}}% 초과" >> "$ALERT_FILE"
+echo "알림 파일: $ALERT_FILE"
+cat "$ALERT_FILE"
+```
+
+## 10. 점검 리포트 저장
+
+```sh run timeout=10
+REPORT="/tmp/fleet-health-{{fleet_name}}-$(date +%Y%m%d).txt"
+echo "플릿 건강 점검 완료: {{fleet_name}}" > "$REPORT"
+echo "완료: $(date '+%Y-%m-%d %H:%M:%S KST')" >> "$REPORT"
+echo "리포트: $REPORT"
+echo ""
+echo "다음 정기 점검: $(date -d '+1 day' '+%Y-%m-%d 09:00' 2>/dev/null || echo '내일 09:00')"
+```

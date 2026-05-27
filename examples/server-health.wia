@@ -1,0 +1,40 @@
+---
+wia: "1"
+title: WIA SOOM 서버 건강 점검
+lang: ko
+agent: soomy
+inputs:
+  threshold: { type: number, default: 90 }
+---
+
+# 서버 건강 점검 런북
+
+## 1. 디스크 사용량 확인
+
+```sh run
+df -h / | awk 'NR==2{print $5}'
+```
+
+## 2. 메모리 확인
+
+```sh run
+free | awk 'NR==2{printf "%d%%", $3/$2*100}'
+```
+
+## 3. PM2 서비스 상태
+
+```verify expect=0
+pm2 pid soom-api > /dev/null 2>&1
+```
+
+## 4. PM2 전체 목록
+
+```sh run
+pm2 jlist 2>/dev/null | python3 -c "import sys,json; [print(f'{p[\"name\"]:20s} {p[\"pm2_env\"][\"status\"]}') for p in json.load(sys.stdin)]"
+```
+
+## 5. 최근 에러 로그
+
+```sh run
+find /var/log/app -name "*.log" -mmin -60 -exec grep -l "ERROR\|FATAL" {} \; 2>/dev/null | head -5 || echo "No recent errors"
+```

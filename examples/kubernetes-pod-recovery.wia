@@ -1,0 +1,147 @@
+---
+wia: "1"
+title: Kubernetes 파드 복구
+agent:
+  role: Kubernetes 운영 전문가
+  rules:
+    - 파드 강제 삭제 전 반드시 이벤트 확인
+    - PVC 바인딩 문제는 별도 절차 필요
+    - watch 모드로 복구 진행 상황 모니터링
+inputs:
+  namespace: { type: string, default: "default", description: "K8s 네임스페이스" }
+  pod_prefix: { type: string, description: "복구할 파드 이름 접두사 (예: soom-api, nginx)" }
+---
+
+# Kubernetes 파드 복구: {{pod_prefix}} ({{namespace}})
+
+> src: https://kubernetes.io/docs/tasks/debug/debug-application/
+
+## 1. 클러스터 접속 및 컨텍스트 확인
+
+```sh run timeout=10
+echo "=== 현재 K8s 컨텍스트 ===" && \
+kubectl config current-context 2>&1 && \
+echo "=== 클러스터 상태 ===" && \
+kubectl cluster-info 2>&1 | head -5
+```
+
+## 2. 네임스페이스 내 파드 전체 상태
+
+```sh run timeout=15
+echo "=== 네임스페이스: {{namespace}} 파드 목록 ===" && \
+kubectl get pods -n {{namespace}} \
+  --sort-by='.status.phase' \
+  -o wide 2>&1 | head -30
+```
+
+## 3. 대상 파드 상태 필터링
+
+```sh run timeout=10
+echo "=== {{pod_prefix}} 파드 상태 ===" && \
+kubectl get pods -n {{namespace}} \
+  --field-selector=status.phase!=Running \
+  2>&1 | grep -E "{{pod_prefix}}|NAME|READY|STATUS" || \
+echo "비정상 파드 없음 (모두 Running)"
+```
+
+## 4. 문제 파드 존재 여부 검증
+
+```verify expect=0 timeout=15
+# CrashLoopBackOff, Error, Pending, OOMKilled 상태 파드 확인
+PROBLEM_COUNT=$(kubectl get pods -n {{namespace}} 2>/dev/null | \
+  grep "{{pod_prefix}}" | \
+  grep -cE "CrashLoop|Error|Pending|OOMKilled|ImagePull|Init:" || echo 0)
+echo "문제 파드 수: $PROBLEM_COUNT"
+[ "$PROBLEM_COUNT" -gt 0 ]
+```
+
+## 5. 문제 파드 상세 정보 (Describe)
+
+```sh run timeout=15
+POD_NAME=$(kubectl get pods -n {{namespace}} 2>/dev/null | \
+  grep "{{pod_prefix}}" | \
+  grep -E "CrashLoop|Error|Pending|OOMKilled|ImagePull" | \
+  awk '{print $1}' | head -1)
+
+if [ -n "$POD_NAME" ]; then
+  echo "=== 파드 상세: $POD_NAME ===" && \
+  kubectl describe pod "$POD_NAME" -n {{namespace}} 2>&1 | \
+    grep -A5 -E "Events:|Reason:|Message:|Conditions:|Limits:|Requests:" | \
+    head -50
+else
+  echo "분석할 문제 파드 없음"
+fi
+```
+
+## 6. 파드 로그 확인 (마지막 50줄)
+
+```sh run timeout=15
+POD_NAME=$(kubectl get pods -n {{namespace}} 2>/dev/null | \
+  grep "{{pod_prefix}}" | head -1 | awk '{print $1}')
+
+if [ -n "$POD_NAME" ]; then
+  echo "=== 파드 로그: $POD_NAME ===" && \
+  kubectl logs "$POD_NAME" -n {{namespace}} \
+    --previous --tail=50 2>/dev/null || \
+  kubectl logs "$POD_NAME" -n {{namespace}} \
+    --tail=50 2>&1
+else
+  echo "로그를 가져올 파드 없음"
+fi
+```
+
+## 7. 파드 이벤트 (최근 이슈 원인 추적)
+
+```sh run timeout=10
+kubectl get events -n {{namespace}} \
+  --sort-by='.lastTimestamp' \
+  --field-selector type=Warning \
+  2>&1 | grep -E "{{pod_prefix}}|REASON|MESSAGE" | tail -15 || \
+echo "Warning 이벤트 없음"
+```
+
+## 8. AI 파드 장애 원인 분석
+
+```ai model=gpt-4o
+Kubernetes 파드 복구 분석:
+
+네임스페이스: {{namespace}}
+파드 접두사: {{pod_prefix}}
+
+수집된 진단 데이터:
+{{$prev}}
+
+한국어로 분석해주세요:
+1. 파드 실패 원인 (CrashLoopBackOff, OOMKilled, ImagePull 등 구체적으로)
+2. 즉각 조치 방법
+3. 재발 방지를 위한 리소스 제한/요청 권장값
+4. Deployment/StatefulSet 레벨 수정 필요 여부
+```
+
+## 9. 파드 재시작 (조건부 승인)
+
+```sh run approve timeout=30
+POD_NAME=$(kubectl get pods -n {{namespace}} 2>/dev/null | \
+  grep "{{pod_prefix}}" | \
+  grep -E "CrashLoop|Error|Pending|OOMKilled" | \
+  awk '{print $1}' | head -1)
+
+if [ -n "$POD_NAME" ]; then
+  echo "=== 파드 삭제 (ReplicaSet이 자동 재생성) ===" && \
+  kubectl delete pod "$POD_NAME" -n {{namespace}} --grace-period=30 2>&1 && \
+  echo "삭제 완료 — 재생성 대기 중..."
+else
+  echo "재시작할 문제 파드 없음"
+fi
+```
+
+## 10. 복구 후 감시 (30초 간격)
+
+```sh run watch=30 timeout=120
+echo "=== [$(date '+%H:%M:%S')] 파드 상태 모니터링 ===" && \
+kubectl get pods -n {{namespace}} 2>&1 | grep -E "{{pod_prefix}}|NAME" && \
+echo "--- Running 파드 수: $(kubectl get pods -n {{namespace}} 2>/dev/null | grep '{{pod_prefix}}' | grep -c Running) ---"
+```
+
+> src: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/
+> src: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/

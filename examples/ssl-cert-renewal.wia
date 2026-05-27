@@ -1,0 +1,168 @@
+---
+wia: "1"
+title: SSL 인증서 갱신
+agent:
+  role: 인프라 보안 엔지니어
+  rules:
+    - 만료 30일 이하에서만 갱신 실행
+    - 갱신 전 현재 인증서 백업 필수
+    - nginx reload 실패 시 즉시 롤백
+inputs:
+  domain: { type: string, description: "갱신할 도메인 (예: wiasoom.com)" }
+  webroot: { type: string, default: "/var/www/html", description: "웹루트 경로 (Let's Encrypt 인증용)" }
+---
+
+# SSL 인증서 갱신: {{domain}}
+
+> src: https://letsencrypt.org/docs/
+> src: https://certbot.eff.org/docs/using.html
+
+## 1. 현재 인증서 만료일 확인
+
+```sh run timeout=15
+echo "=== {{domain}} 인증서 정보 ===" && \
+openssl s_client -servername {{domain}} -connect {{domain}}:443 \
+  </dev/null 2>/dev/null | \
+  openssl x509 -noout -dates -issuer -subject 2>/dev/null || \
+echo "직접 확인 시도..." && \
+certbot certificates 2>/dev/null | grep -A5 "{{domain}}" || \
+echo "certbot 인증서 목록 조회 실패"
+```
+
+## 2. 만료까지 남은 일수 계산
+
+```sh run timeout=15
+EXPIRY=$(openssl s_client -servername {{domain}} -connect {{domain}}:443 \
+  </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+if [ -n "$EXPIRY" ]; then
+  EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$EXPIRY" +%s 2>/dev/null)
+  NOW_EPOCH=$(date +%s)
+  DAYS_LEFT=$(( ($EXPIRY_EPOCH - $NOW_EPOCH) / 86400 ))
+  echo "만료일: $EXPIRY"
+  echo "남은 일수: ${DAYS_LEFT}일"
+  [ "$DAYS_LEFT" -lt 30 ] && echo "STATUS:RENEW_NEEDED" || echo "STATUS:VALID"
+else
+  echo "만료일 확인 실패 — 갱신 권장"
+  echo "STATUS:RENEW_NEEDED"
+fi
+```
+
+## 3. 30일 이내 만료 여부 검증
+
+```verify expect=0 timeout=15
+EXPIRY=$(openssl s_client -servername {{domain}} -connect {{domain}}:443 \
+  </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+if [ -z "$EXPIRY" ]; then
+  echo "인증서 조회 실패 — 갱신 필요로 처리"
+  exit 0  # 갱신 블록 실행을 위해 성공 처리
+fi
+EXPIRY_EPOCH=$(date -d "$EXPIRY" +%s 2>/dev/null)
+NOW_EPOCH=$(date +%s)
+DAYS_LEFT=$(( ($EXPIRY_EPOCH - $NOW_EPOCH) / 86400 ))
+if [ "$DAYS_LEFT" -lt 30 ]; then
+  echo "갱신 필요: ${DAYS_LEFT}일 남음"
+  exit 0  # 갱신 진행
+else
+  echo "갱신 불필요: ${DAYS_LEFT}일 남음 (30일 기준)"
+  exit 1  # 이후 갱신 블록 건너뜀
+fi
+```
+
+## 4. 현재 인증서 백업
+
+```sh run if={{$prev}}=ok timeout=15
+BACKUP_DIR="/etc/ssl/backups/{{domain}}_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+# certbot 관리 인증서
+cp -r "/etc/letsencrypt/live/{{domain}}" "$BACKUP_DIR/" 2>/dev/null || true
+# 직접 관리 인증서
+cp "/etc/ssl/certs/{{domain}}.crt" "$BACKUP_DIR/" 2>/dev/null || true
+cp "/etc/ssl/private/{{domain}}.key" "$BACKUP_DIR/" 2>/dev/null || true
+echo "백업 완료: $BACKUP_DIR"
+ls -la "$BACKUP_DIR/" 2>/dev/null
+```
+
+## 5. 갱신 실행 승인
+
+```sh run approve if={{$prev}}=ok timeout=10
+echo "=== 인증서 갱신 승인됨 ===" && \
+echo "도메인: {{domain}}" && \
+echo "시간: $(date '+%Y-%m-%d %H:%M:%S KST')"
+```
+
+## 6. Certbot 갱신 실행
+
+```sh run if={{$prev}}=ok timeout=120
+echo "=== certbot 갱신 시작 ===" && \
+certbot renew --cert-name {{domain}} \
+  --webroot --webroot-path {{webroot}} \
+  --non-interactive \
+  --deploy-hook "systemctl reload nginx" \
+  2>&1 || \
+# 첫 발급인 경우
+certbot certonly \
+  --webroot --webroot-path {{webroot}} \
+  -d {{domain}} -d www.{{domain}} \
+  --non-interactive --agree-tos \
+  --email admin@{{domain}} \
+  2>&1
+```
+
+## 7. Nginx 설정 검증 및 리로드
+
+```sh run timeout=15
+echo "=== Nginx 설정 테스트 ===" && \
+nginx -t 2>&1 && \
+echo "=== Nginx 리로드 ===" && \
+systemctl reload nginx 2>&1 && \
+echo "Nginx 리로드 완료" || \
+echo "ERROR: nginx 설정 오류 — 리로드 건너뜀"
+```
+
+## 8. 갱신 후 인증서 검증
+
+```verify expect=0 timeout=15
+sleep 3
+NEW_EXPIRY=$(openssl s_client -servername {{domain}} -connect {{domain}}:443 \
+  </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+if [ -n "$NEW_EXPIRY" ]; then
+  EXPIRY_EPOCH=$(date -d "$NEW_EXPIRY" +%s 2>/dev/null)
+  NOW_EPOCH=$(date +%s)
+  DAYS_LEFT=$(( ($EXPIRY_EPOCH - $NOW_EPOCH) / 86400 ))
+  echo "새 인증서 만료: $NEW_EXPIRY (${DAYS_LEFT}일 남음)"
+  [ "$DAYS_LEFT" -gt 60 ] && exit 0 || exit 1
+else
+  echo "인증서 검증 실패"
+  exit 1
+fi
+```
+
+## 9. 갱신 실패 시 백업 복원
+
+```sh run if={{$prev}}=fail approve timeout=30
+echo "=== 인증서 롤백 시작 ===" && \
+LATEST_BACKUP=$(ls -dt /etc/ssl/backups/{{domain}}_* 2>/dev/null | head -1) && \
+if [ -n "$LATEST_BACKUP" ]; then
+  cp -r "$LATEST_BACKUP/{{domain}}" /etc/letsencrypt/live/ 2>/dev/null && \
+  systemctl reload nginx && \
+  echo "롤백 완료: $LATEST_BACKUP"
+else
+  echo "ERROR: 복원할 백업 없음 — 수동 조치 필요"
+fi
+```
+
+## 10. 갱신 결과 요약
+
+```ai model=gpt-4o
+SSL 인증서 갱신 작업 결과 — {{domain}}:
+
+{{$prev}}
+
+한국어로 간결하게 정리해주세요:
+1. 갱신 성공/실패 여부
+2. 새 인증서 유효기간
+3. HTTPS 서비스 정상 여부
+4. 다음 갱신 예정일 (90일 기준)
+```
+
+> src: https://www.ssllabs.com/ssltest/

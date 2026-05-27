@@ -1,0 +1,109 @@
+---
+wia: "1"
+title: ROS 센서 상태 점검
+agent:
+  role: 로봇 센서 진단 전문가
+  rules:
+    - 센서 데이터 품질 기준은 데이터시트 기반
+    - 주파수 편차 20% 이상 시 경고
+    - 데이터 없음(timeout)은 센서 고장으로 판단
+inputs:
+  robot_ip: { type: string, description: "로봇 IP 주소" }
+  sensor_topic:
+    type: enum
+    of: [/scan, /camera/image_raw, /imu/data, /gps/fix]
+    description: "점검할 센서 토픽"
+---
+
+# ROS 센서 상태 점검: {{sensor_topic}}
+
+> src: https://docs.ros.org/en/humble/Tutorials/Beginner-CLI-Tools/Understanding-ROS2-Topics/Understanding-ROS2-Topics.html
+
+## 1. 토픽 존재 여부 확인
+
+```verify expect=0 timeout=15
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   source ~/robot_ws/install/setup.bash 2>/dev/null; \
+   ros2 topic list 2>&1 | grep -qF '{{sensor_topic}}'"
+```
+
+## 2. 토픽 메시지 타입 및 메타정보
+
+```sh run timeout=10
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   source ~/robot_ws/install/setup.bash 2>/dev/null; \
+   echo '=== 메시지 타입 ===' && \
+   ros2 topic info {{sensor_topic}} 2>&1 && \
+   echo '=== 발행자 수 ===' && \
+   ros2 topic info {{sensor_topic}} --verbose 2>&1 | grep -E 'Publisher|Subscriber'"
+```
+
+## 3. 토픽 발행 주파수 측정 (5초)
+
+```sh run timeout=20
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   source ~/robot_ws/install/setup.bash 2>/dev/null; \
+   timeout 5 ros2 topic hz {{sensor_topic}} 2>&1 || echo 'TIMEOUT: 5초 내 데이터 없음'"
+```
+
+## 4. 주파수 검증 (센서별 최소 기준)
+
+```verify expect=0 timeout=20
+# /scan: 최소 5Hz, /imu/data: 최소 50Hz, /camera: 최소 10Hz, /gps/fix: 최소 1Hz
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   source ~/robot_ws/install/setup.bash 2>/dev/null; \
+   HZ=\$(timeout 5 ros2 topic hz {{sensor_topic}} 2>&1 | grep average | awk '{print int(\$NF)}'); \
+   TOPIC='{{sensor_topic}}'; \
+   case \$TOPIC in \
+     /scan) MIN=5 ;; \
+     /imu/data) MIN=50 ;; \
+     /camera/image_raw) MIN=10 ;; \
+     /gps/fix) MIN=1 ;; \
+     *) MIN=1 ;; \
+   esac; \
+   [ -n \"\$HZ\" ] && [ \"\$HZ\" -ge \"\$MIN\" ] && echo \"OK: \${HZ}Hz >= \${MIN}Hz\" || exit 1"
+```
+
+## 5. 센서 데이터 샘플 캡처 (1회)
+
+```sh run timeout=15
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   source ~/robot_ws/install/setup.bash 2>/dev/null; \
+   timeout 3 ros2 topic echo {{sensor_topic}} --once 2>&1 | head -40 || \
+   echo 'WARN: 샘플 수집 실패'"
+```
+
+## 6. 센서 노드 프로세스 상태
+
+```sh run timeout=10
+ssh ubuntu@{{robot_ip}} \
+  "echo '=== 관련 프로세스 ===' && \
+   SENSOR_KEY=\$(echo '{{sensor_topic}}' | tr '/' '_' | sed 's/^_//'); \
+   ps aux | grep -E 'lidar|laser|camera|imu|gps|sensor' | grep -v grep | \
+   awk '{printf \"PID:%-8s CPU:%-6s MEM:%-6s %s\\n\", \$2, \$3, \$4, \$11}' || \
+   echo '관련 프로세스를 찾을 수 없음'"
+```
+
+## 7. AI 센서 데이터 품질 분석
+
+```ai model=gpt-4o
+ROS 2 센서 토픽 {{sensor_topic}} 점검 결과 분석:
+
+{{$prev}}
+
+한국어로 다음을 분석해주세요:
+1. 센서 동작 상태 (정상/불안정/고장)
+2. 데이터 품질 평가 (주파수, 노이즈, 타임스탬프 일관성)
+3. 이상 징후 설명 (있는 경우)
+4. 권장 조치사항 (센서 재보정, 드라이버 재시작, 하드웨어 점검 등)
+
+센서 타입: {{sensor_topic}} 기준으로 판단해주세요.
+```
+
+> src: https://docs.ros.org/en/humble/Tutorials/Beginner-CLI-Tools/Understanding-ROS2-Topics/Understanding-ROS2-Topics.html
+> src: https://github.com/ros-drivers/velodyne

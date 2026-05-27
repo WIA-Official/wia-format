@@ -1,0 +1,155 @@
+---
+wia: "1"
+title: 데이터베이스 유지보수
+agent:
+  role: DBA (데이터베이스 관리 전문가)
+  rules:
+    - 백업 확인 없이는 DDL/DML 실행 금지
+    - slow query 종료는 반드시 확인 후
+    - 디스크 80% 초과 시 즉시 정리 실행
+inputs:
+  db_host: { type: string, description: "DB 서버 호스트 (예: db.example.com)" }
+  db_name: { type: string, default: "cqm", description: "대상 데이터베이스명" }
+  db_user: { type: string, default: "dbuser", description: "DB 접속 계정" }
+---
+
+# 데이터베이스 유지보수: {{db_name}} @ {{db_host}}
+
+> src: https://dev.mysql.com/doc/refman/8.0/en/optimization.html
+
+## 1. DB 서버 접속 확인
+
+```verify expect=0 timeout=10
+ssh -o ConnectTimeout=8 ec2-user@{{db_host}} \
+  "mysqladmin -u {{db_user}} ping 2>/dev/null | grep -q alive"
+```
+
+## 2. 디스크 공간 확인
+
+```sh run timeout=10
+ssh ec2-user@{{db_host}} \
+  "echo '=== 전체 디스크 ===' && df -h / /var/lib/mysql 2>/dev/null && \
+   echo '=== MySQL 데이터 디렉토리 크기 ===' && \
+   du -sh /var/lib/mysql/{{db_name}} 2>/dev/null || \
+   du -sh /var/lib/mysql/ 2>/dev/null"
+```
+
+## 3. 현재 DB 연결 수 및 상태
+
+```sh run timeout=10
+ssh ec2-user@{{db_host}} \
+  "mysql -u {{db_user}} -e \
+    'SHOW STATUS WHERE Variable_name IN (
+       \"Threads_connected\", \"Threads_running\",
+       \"Max_used_connections\", \"Uptime\",
+       \"Questions\", \"Slow_queries\"
+    );' 2>/dev/null"
+```
+
+## 4. Slow Query 확인
+
+```sh run timeout=15
+ssh ec2-user@{{db_host}} \
+  "mysql -u {{db_user}} {{db_name}} -e \
+    'SELECT id, user, host, db, time, state, \
+            LEFT(info, 80) AS query \
+     FROM information_schema.processlist \
+     WHERE time > 5 AND command != \"Sleep\" \
+     ORDER BY time DESC \
+     LIMIT 10;' 2>/dev/null || echo 'slow query 없음'"
+```
+
+## 5. 테이블 크기 상위 10개
+
+```sh run timeout=15
+ssh ec2-user@{{db_host}} \
+  "mysql -u {{db_user}} -e \
+    'SELECT table_schema AS \`DB\`, table_name AS \`Table\`,
+            ROUND((data_length + index_length) / 1048576, 2) AS \`Size_MB\`,
+            table_rows AS \`Rows\`
+     FROM information_schema.tables
+     WHERE table_schema = \"{{db_name}}\"
+     ORDER BY (data_length + index_length) DESC
+     LIMIT 10;' 2>/dev/null"
+```
+
+## 6. 최근 백업 파일 확인
+
+```verify expect=0 timeout=10
+ssh ec2-user@{{db_host}} \
+  "BACKUP=$(find /home/ec2-user/backups /var/backups /tmp -name '{{db_name}}*.sql*' \
+     -mtime -1 2>/dev/null | head -1)
+   if [ -n \"\$BACKUP\" ]; then
+     echo \"최근 백업 존재: \$BACKUP\"
+     exit 0
+   else
+     echo 'WARN: 24시간 내 백업 없음'
+     exit 1
+   fi"
+```
+
+## 7. 즉시 백업 실행 (백업 없는 경우)
+
+```sh run if={{$prev}}=fail timeout=120
+ssh ec2-user@{{db_host}} \
+  "BACKUP_DIR=\$HOME/backups && mkdir -p \$BACKUP_DIR && \
+   BACKUP_FILE=\"\$BACKUP_DIR/{{db_name}}_\$(date +%Y%m%d_%H%M%S).sql.gz\" && \
+   mysqldump -u {{db_user}} --single-transaction {{db_name}} 2>/dev/null | \
+     gzip > \"\$BACKUP_FILE\" && \
+   ls -lh \"\$BACKUP_FILE\" && \
+   echo '백업 완료'"
+```
+
+## 8. 디스크 80% 초과 시 자동 정리
+
+```sh run timeout=30
+ssh ec2-user@{{db_host}} \
+  "DISK_PCT=\$(df /var/lib/mysql 2>/dev/null | awk 'NR==2{print int(\$5)}')
+   echo \"디스크 사용률: \${DISK_PCT}%\"
+   if [ \"\$DISK_PCT\" -gt 80 ]; then
+     echo '=== 디스크 80% 초과 — 정리 시작 ==='
+     # 7일 이상된 백업 삭제
+     find \$HOME/backups -name '*.sql.gz' -mtime +7 -delete 2>/dev/null && \
+       echo '7일 이상 백업 삭제 완료'
+     # MySQL 바이너리 로그 정리 (7일 이전)
+     mysql -u {{db_user}} -e 'PURGE BINARY LOGS BEFORE DATE_SUB(NOW(), INTERVAL 7 DAY);' 2>/dev/null && \
+       echo '바이너리 로그 정리 완료'
+     # 새 디스크 사용률 확인
+     df -h /var/lib/mysql 2>/dev/null | tail -1
+   else
+     echo '디스크 정상 — 정리 불필요'
+   fi"
+```
+
+## 9. OPTIMIZE TABLE (단편화 정리)
+
+```sh run approve timeout=300
+ssh ec2-user@{{db_host}} \
+  "mysql -u {{db_user}} {{db_name}} -e \
+    'SELECT CONCAT(\"OPTIMIZE TABLE \", table_name, \";\") AS cmd
+     FROM information_schema.tables
+     WHERE table_schema = \"{{db_name}}\"
+       AND data_free > 104857600
+     LIMIT 5;' 2>/dev/null | grep OPTIMIZE | \
+   while read CMD; do
+     echo \"실행: \$CMD\"
+     mysql -u {{db_user}} {{db_name}} -e \"\$CMD\" 2>/dev/null
+   done || echo '단편화 테이블 없음 (100MB 초과 기준)'"
+```
+
+## 10. 유지보수 결과 요약
+
+```ai model=gpt-4o
+데이터베이스 {{db_name}} ({{db_host}}) 유지보수 결과:
+
+{{$prev}}
+
+한국어로 분석해주세요:
+1. DB 전체 건강 점수 (0-100)
+2. 발견된 문제점 목록
+3. 권장 조치사항 (우선순위 순)
+4. 다음 유지보수 주기 권장
+```
+
+> src: https://dev.mysql.com/doc/refman/8.0/en/mysqlcheck.html
+> src: https://dev.mysql.com/doc/refman/8.0/en/optimize-table.html

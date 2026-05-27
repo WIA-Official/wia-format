@@ -1,0 +1,152 @@
+---
+wia: "1"
+title: 플릿 소프트웨어 배포
+agent:
+  role: 플릿 배포 전문가
+  rules:
+    - production 배포는 반드시 승인 필요
+    - 드라이런 먼저, 실제 배포는 확인 후
+    - 실패 시 즉시 롤백, 진행 중단
+inputs:
+  version: { type: string, description: "배포할 소프트웨어 버전 (예: v3.5.0)" }
+  environment:
+    type: enum
+    of: [staging, production]
+    description: "배포 환경"
+  fleet_hosts: { type: string, default: "robot1 robot2 robot3", description: "스페이스로 구분된 로봇 호스트명" }
+---
+
+# 플릿 소프트웨어 배포: {{version}} → {{environment}}
+
+> src: https://docs.ros.org/en/humble/Tutorials/Advanced/Deploying-ROS2.html
+
+## 1. 배포 전 현재 버전 조회
+
+```sh run timeout=30
+echo "=== 플릿 현재 버전 조회 ===" && \
+for HOST in {{fleet_hosts}}; do
+  CURRENT=$(ssh -o ConnectTimeout=5 ubuntu@${HOST} \
+    "cat ~/robot_ws/VERSION 2>/dev/null || echo 'unknown'" 2>/dev/null)
+  printf "%-20s → %s\n" "$HOST" "$CURRENT"
+done
+```
+
+## 2. 플릿 연결 상태 검증
+
+```verify expect=0 timeout=20
+FAIL=0
+for HOST in {{fleet_hosts}}; do
+  ssh -o ConnectTimeout=5 ubuntu@${HOST} "echo ok" > /dev/null 2>&1 || {
+    echo "UNREACHABLE: $HOST"
+    FAIL=1
+  }
+done
+exit $FAIL
+```
+
+## 3. 패키지 다운로드 (드라이런)
+
+```sh run timeout=30
+echo "=== 드라이런: 패키지 검증 ===" && \
+# 실제 환경에서는 apt-get --dry-run, helm upgrade --dry-run 등 사용
+for HOST in {{fleet_hosts}}; do
+  ssh -o ConnectTimeout=5 ubuntu@${HOST} \
+    "echo '[DRY-RUN] ${HOST}: 버전 {{version}} 설치 시뮬레이션 완료'" 2>/dev/null || \
+    echo "[SKIP] $HOST 연결 실패"
+done
+```
+
+## 4. Production 배포 승인 (production 환경만)
+
+```sh run approve if={{environment}}=production timeout=60
+echo "=== PRODUCTION 배포 승인됨 ===" && \
+echo "버전: {{version}}" && \
+echo "대상: {{fleet_hosts}}" && \
+echo "시간: $(date '+%Y-%m-%d %H:%M:%S KST')" && \
+echo "승인자 확인 완료"
+```
+
+## 5. Staging 배포 (자동 진행)
+
+```sh run if={{environment}}=staging timeout=120
+echo "=== Staging 배포 시작: {{version}} ===" && \
+for HOST in {{fleet_hosts}}; do
+  echo "--- Deploying to $HOST ---" && \
+  ssh -o ConnectTimeout=10 ubuntu@${HOST} \
+    "cd ~/robot_ws && \
+     cp -r src src.bak_\$(date +%Y%m%d_%H%M%S) 2>/dev/null; \
+     echo '{{version}}' > VERSION && \
+     echo '[STAGING] $HOST: {{version}} 배포 완료'" 2>/dev/null || \
+    echo "[WARN] $HOST 배포 실패"
+done
+```
+
+## 6. Production 배포 실행
+
+```sh run if={{environment}}=production timeout=180
+echo "=== Production 배포 시작: {{version}} ===" && \
+DEPLOY_LOG="/tmp/fleet-deploy-$(date +%Y%m%d_%H%M%S).log" && \
+for HOST in {{fleet_hosts}}; do
+  echo "--- Deploying to $HOST ---" | tee -a "$DEPLOY_LOG" && \
+  ssh -o ConnectTimeout=10 ubuntu@${HOST} \
+    "cd ~/robot_ws && \
+     cp -r src src.bak_\$(date +%Y%m%d_%H%M%S) 2>/dev/null; \
+     echo '{{version}}' > VERSION && \
+     # 실제: sudo apt-get install -y robot-software={{version}}
+     echo '[PROD] $HOST: {{version}} 배포 완료'" 2>/dev/null | tee -a "$DEPLOY_LOG" || \
+    echo "[ERROR] $HOST 배포 실패" | tee -a "$DEPLOY_LOG"
+done && \
+echo "=== 배포 로그: $DEPLOY_LOG ==="
+```
+
+## 7. 배포 성공 검증
+
+```verify expect=0 timeout=30
+FAIL=0
+for HOST in {{fleet_hosts}}; do
+  INSTALLED=$(ssh -o ConnectTimeout=5 ubuntu@${HOST} \
+    "cat ~/robot_ws/VERSION 2>/dev/null" 2>/dev/null)
+  if [ "$INSTALLED" = "{{version}}" ]; then
+    echo "OK: $HOST → $INSTALLED"
+  else
+    echo "FAIL: $HOST → expected {{version}}, got ${INSTALLED:-unknown}"
+    FAIL=1
+  fi
+done
+exit $FAIL
+```
+
+## 8. 배포 실패 시 롤백
+
+```sh run if={{$prev}}=fail approve timeout=120
+echo "=== 롤백 시작 ===" && \
+for HOST in {{fleet_hosts}}; do
+  ssh -o ConnectTimeout=10 ubuntu@${HOST} \
+    "cd ~/robot_ws && \
+     BACKUP=\$(ls -dt src.bak_* 2>/dev/null | head -1) && \
+     if [ -n \"\$BACKUP\" ]; then \
+       rm -rf src && cp -r \"\$BACKUP\" src && \
+       echo '[ROLLBACK] $HOST: 이전 버전 복원 완료 (\$BACKUP)'; \
+     else \
+       echo '[WARN] $HOST: 백업 없음'; \
+     fi" 2>/dev/null || echo "[ERROR] $HOST 롤백 실패"
+done
+```
+
+## 9. 배포 결과 요약
+
+```ai model=gpt-4o
+플릿 소프트웨어 배포 결과 요약:
+
+- 버전: {{version}}
+- 환경: {{environment}}
+- 대상 호스트: {{fleet_hosts}}
+
+배포 결과:
+{{$prev}}
+
+한국어로 다음을 작성해주세요:
+1. 전체 배포 성공률
+2. 실패한 노드 목록 (있는 경우)
+3. 다음 권장 조치
+```

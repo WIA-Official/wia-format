@@ -1,0 +1,98 @@
+---
+wia: "1"
+title: ROS 2 로봇 전체 진단
+agent:
+  role: ROS 2 전문 SRE 엔지니어
+  rules:
+    - 로봇 안전을 최우선으로 한다
+    - 진단 중 액추에이터 명령 금지
+    - 이상 감지 시 즉시 보고
+inputs:
+  robot_ip: { type: string, description: "로봇 SSH 접속 IP (예: 192.168.1.100)" }
+---
+
+# ROS 2 로봇 전체 진단: {{robot_ip}}
+
+> src: https://docs.ros.org/en/humble/Tutorials.html
+
+## 1. 로봇 접속 및 ROS 환경 확인
+
+```sh run timeout=15
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && ros2 doctor --report 2>&1 | head -30"
+```
+
+## 2. ROS 2 배포판 및 버전 확인
+
+```sh run timeout=10
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   echo 'ROS_DISTRO:' \$ROS_DISTRO && \
+   echo 'ROS_VERSION:' \$ROS_VERSION && \
+   ros2 --version 2>&1"
+```
+
+## 3. 활성 노드 목록 조회
+
+```sh run timeout=15
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   source ~/robot_ws/install/setup.bash 2>/dev/null; \
+   ros2 node list 2>&1"
+```
+
+## 4. 토픽 목록 및 Hz 요약
+
+```sh run timeout=20
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   source ~/robot_ws/install/setup.bash 2>/dev/null; \
+   ros2 topic list -t 2>&1"
+```
+
+## 5. 서비스 목록 조회
+
+```sh run timeout=15
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   source ~/robot_ws/install/setup.bash 2>/dev/null; \
+   ros2 service list 2>&1 | head -30"
+```
+
+## 6. 핵심 노드 실행 여부 검증
+
+```verify expect=0 timeout=15
+# navigation2, nav2_bringup, amcl (localization), robot_state_publisher 중 하나 이상 실행 여부
+ssh ubuntu@{{robot_ip}} \
+  "source /opt/ros/humble/setup.bash && \
+   source ~/robot_ws/install/setup.bash 2>/dev/null; \
+   ros2 node list 2>&1 | grep -E 'nav|amcl|robot_state|sensor|lidar|camera' | grep -c ."
+```
+
+## 7. 시스템 리소스 (CPU / 메모리 / 온도) 확인
+
+```sh run timeout=10
+ssh ubuntu@{{robot_ip}} \
+  "echo '=== CPU ===' && top -bn1 | grep 'Cpu(s)' | awk '{print 100-\$8\"%\"}' && \
+   echo '=== Memory ===' && free -h | awk 'NR==2{print \$3\"/\"\$2}' && \
+   echo '=== Temp ===' && cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | \
+     awk '{printf \"%.1f°C\\n\", \$1/1000}' | head -3"
+```
+
+## 8. AI 종합 진단 분석
+
+```ai model=gpt-4o
+당신은 ROS 2 로봇 진단 전문가입니다.
+아래는 로봇 {{robot_ip}} 의 전체 진단 결과입니다:
+
+{{$prev}}
+
+다음 항목을 한국어로 간결하게 분석해주세요:
+1. 전체 건강 상태 (정상/주의/위험)
+2. 실행 중인 핵심 노드 현황
+3. 발견된 이상 징후
+4. 즉시 조치가 필요한 사항
+```
+
+> src: https://navigation.ros.org/
+> src: https://docs.ros.org/en/humble/Concepts/About-ROS-2-Parameters.html

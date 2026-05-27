@@ -1,0 +1,162 @@
+---
+wia: "1"
+title: 보안 감사 체크리스트
+agent:
+  role: 보안 감사관 (CIS Benchmark 기준)
+  rules:
+    - 감사는 읽기 전용으로만 진행
+    - 발견된 취약점은 즉시 보고하되 자동 수정 금지
+    - 모든 결과는 증거 파일로 저장
+inputs:
+  server_ip: { type: string, description: "감사 대상 서버 IP" }
+  server_user: { type: string, default: "ec2-user", description: "SSH 접속 계정" }
+---
+
+# 보안 감사: {{server_ip}}
+
+> src: https://www.cisecurity.org/benchmark/amazon_linux
+> src: https://www.cisecurity.org/benchmark/red_hat_linux
+
+## 1. 감사 세션 초기화
+
+```sh run timeout=10
+AUDIT_ID="AUDIT-$(date +%Y%m%d-%H%M%S)-$(echo {{server_ip}} | tr '.' '-')"
+EVIDENCE_DIR="/tmp/${AUDIT_ID}"
+mkdir -p "$EVIDENCE_DIR"
+echo "=== 보안 감사 시작 ===" | tee "$EVIDENCE_DIR/audit.log"
+echo "대상: {{server_ip}}" | tee -a "$EVIDENCE_DIR/audit.log"
+echo "감사 ID: $AUDIT_ID" | tee -a "$EVIDENCE_DIR/audit.log"
+echo "시작: $(date '+%Y-%m-%d %H:%M:%S KST')" | tee -a "$EVIDENCE_DIR/audit.log"
+echo "증거 저장: $EVIDENCE_DIR"
+```
+
+## 2. SSH 설정 감사 (CIS 5.2)
+
+```sh run timeout=15
+echo "=== SSH 보안 설정 ===" && \
+ssh -o ConnectTimeout=8 {{server_user}}@{{server_ip}} \
+  "grep -E '^(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|\
+MaxAuthTries|Protocol|ClientAliveInterval|AllowUsers|AllowGroups|\
+PermitEmptyPasswords|X11Forwarding|UsePAM)' \
+  /etc/ssh/sshd_config 2>/dev/null || echo 'sshd_config 접근 실패'"
+```
+
+## 3. SSH 취약 설정 검증
+
+```verify expect=0 timeout=15
+# PermitRootLogin=no, PasswordAuthentication=no 이어야 안전
+ssh -o ConnectTimeout=8 {{server_user}}@{{server_ip}} \
+  "FAIL=0
+   ROOT_LOGIN=\$(grep -E '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null | awk '{print \$2}')
+   PASS_AUTH=\$(grep -E '^PasswordAuthentication' /etc/ssh/sshd_config 2>/dev/null | awk '{print \$2}')
+   [ \"\$ROOT_LOGIN\" = 'no' ] || { echo 'FAIL: PermitRootLogin='\$ROOT_LOGIN; FAIL=1; }
+   [ \"\$PASS_AUTH\" = 'no' ] || { echo 'WARN: PasswordAuthentication='\$PASS_AUTH; }
+   [ \"\$FAIL\" -eq 0 ] && echo 'SSH 설정 OK'
+   exit \$FAIL" 2>/dev/null
+```
+
+## 4. 열린 포트 스캔 (CIS 3.5)
+
+```sh run timeout=20
+echo "=== 수신 대기 포트 ===" && \
+ssh -o ConnectTimeout=8 {{server_user}}@{{server_ip}} \
+  "ss -tuln 2>/dev/null | grep LISTEN | awk '{print \$5}' | sort -u && \
+   echo '--- 외부 노출 포트 (0.0.0.0 바인딩) ---' && \
+   ss -tuln 2>/dev/null | grep 'LISTEN.*0.0.0.0\|LISTEN.*:::' | \
+     awk '{print \$5}' | sort -u"
+```
+
+## 5. 실패한 로그인 시도 분석 (CIS 5.4)
+
+```sh run timeout=15
+echo "=== 최근 실패 로그인 (상위 10 소스) ===" && \
+ssh -o ConnectTimeout=8 {{server_user}}@{{server_ip}} \
+  "grep 'Failed password\|Invalid user\|authentication failure' \
+     /var/log/secure /var/log/auth.log 2>/dev/null | \
+   awk '{print \$(NF-3)}' | sort | uniq -c | sort -rn | head -10 || \
+   echo '로그 접근 불가'"
+```
+
+## 6. 중요 파일 권한 점검 (CIS 6.1)
+
+```sh run timeout=15
+echo "=== 중요 파일 권한 ===" && \
+ssh -o ConnectTimeout=8 {{server_user}}@{{server_ip}} \
+  "for FILE in /etc/passwd /etc/shadow /etc/group /etc/gshadow \
+               /etc/ssh/sshd_config /etc/crontab; do
+     if [ -f \"\$FILE\" ]; then
+       PERM=\$(stat -c '%a %U %G' \"\$FILE\" 2>/dev/null)
+       echo \"\$FILE → \$PERM\"
+     fi
+   done && \
+   echo '--- SUID 파일 (비표준) ---' && \
+   find /usr/local /home /opt -perm -4000 -type f 2>/dev/null | head -10 || true"
+```
+
+## 7. 패키지 업데이트 현황 (CIS 1.9)
+
+```sh run timeout=30
+echo "=== 보안 업데이트 필요 패키지 ===" && \
+ssh -o ConnectTimeout=8 {{server_user}}@{{server_ip}} \
+  "if command -v yum &>/dev/null; then \
+     yum check-update --security 2>/dev/null | tail -20; \
+   elif command -v apt-get &>/dev/null; then \
+     apt-get -s upgrade 2>/dev/null | grep -i 'security\|Inst' | head -20; \
+   else \
+     echo '패키지 매니저 불명'; \
+   fi"
+```
+
+## 8. 계정 및 sudo 권한 점검 (CIS 5.4)
+
+```sh run timeout=10
+echo "=== 로그인 가능 계정 ===" && \
+ssh -o ConnectTimeout=8 {{server_user}}@{{server_ip}} \
+  "grep -vE 'nologin|false|sync|halt|shutdown' /etc/passwd 2>/dev/null | \
+     awk -F: '{print \$1, \$3, \$7}' && \
+   echo '--- sudo 권한 보유 계정 ---' && \
+   grep -E '^[^#].*ALL=' /etc/sudoers /etc/sudoers.d/* 2>/dev/null | head -10"
+```
+
+## 9. AI 취약점 종합 분석 및 보고서
+
+```ai model=gpt-4o
+서버 보안 감사 결과 — {{server_ip}}
+
+CIS Benchmark 기준 감사 데이터:
+{{$prev}}
+
+한국어로 공식 감사 보고서 형식으로 작성해주세요:
+
+## 보안 감사 요약
+- 감사 대상: {{server_ip}}
+- 감사 기준: CIS Amazon Linux Benchmark
+
+## 발견된 취약점
+(심각도별: Critical / High / Medium / Low)
+
+## 즉시 조치 필요 항목
+(순서대로 나열)
+
+## 준수 항목
+(통과한 보안 설정)
+
+## 권장 조치 계획
+```
+
+## 10. 감사 증거 파일 최종화
+
+```sh run timeout=10
+AUDIT_ID="AUDIT-$(date +%Y%m%d)-{{server_ip}}"
+REPORT_FILE="/tmp/${AUDIT_ID}-report.txt"
+echo "=== 보안 감사 완료 ===" > "$REPORT_FILE"
+echo "서버: {{server_ip}}" >> "$REPORT_FILE"
+echo "완료: $(date '+%Y-%m-%d %H:%M:%S KST')" >> "$REPORT_FILE"
+echo "보고서: $REPORT_FILE"
+echo ""
+echo "다음 명령으로 보고서를 다운로드하세요:"
+echo "scp {{server_user}}@{{server_ip}} → 로컬 필요 시 sftp 사용"
+```
+
+> src: https://www.cisecurity.org/insights/white-papers/cis-controls-v8
+> src: https://www.nist.gov/cyberframework

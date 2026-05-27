@@ -1,0 +1,150 @@
+---
+wia: "1"
+title: 서버 장애 대응 SOP
+agent:
+  role: Soomy (SRE + 장애 대응 전문가)
+  rules:
+    - critical/high 장애는 반드시 승인 후 조치
+    - 모든 조치는 타임스탬프와 함께 기록
+    - 복구 후 반드시 사후 검증 실행
+inputs:
+  service_name:
+    type: enum
+    of: [my-api, my-worker, my-frontend, my-backend]
+    description: "장애 서비스명"
+  severity:
+    type: enum
+    of: [low, medium, high, critical]
+    description: "장애 심각도"
+---
+
+# 서버 장애 대응: {{service_name}} ({{severity}})
+
+> src: https://sre.google/sre-book/table-of-contents/
+
+## 1. 초기 상태 캡처 (타임스탬프)
+
+```sh run timeout=10
+echo "=== 장애 대응 시작 ===" && \
+echo "서비스: {{service_name}}" && \
+echo "심각도: {{severity}}" && \
+echo "시간: $(date '+%Y-%m-%d %H:%M:%S KST')" && \
+echo "서버: $(hostname) ($(curl -s ifconfig.me 2>/dev/null || echo 'IP 확인 실패'))"
+```
+
+## 2. 서비스 상태 및 프로세스 확인
+
+```sh run timeout=15
+echo "=== PM2 상태 ===" && \
+pm2 describe {{service_name}} 2>/dev/null | grep -E 'name|status|pid|restart|uptime|cpu|memory' || \
+echo "PM2에서 서비스를 찾을 수 없음" && \
+echo "=== 프로세스 확인 ===" && \
+ps aux | grep -E '{{service_name}}|node' | grep -v grep | head -5
+```
+
+## 3. 최근 에러 로그 분석
+
+```sh run timeout=15
+echo "=== 최근 오류 로그 (50줄) ===" && \
+pm2 logs {{service_name}} --nostream --lines 50 2>/dev/null | \
+  grep -E 'ERROR|FATAL|WARN|Error|Exception|undefined|null' | tail -20 || \
+echo "로그를 가져올 수 없음"
+```
+
+## 4. 시스템 리소스 현황
+
+```sh run timeout=10
+echo "=== CPU ===" && top -bn1 | grep 'Cpu' | head -1 && \
+echo "=== 메모리 ===" && free -h && \
+echo "=== 디스크 ===" && df -h / /var 2>/dev/null && \
+echo "=== 네트워크 연결 수 ===" && ss -tuln | grep -E ':3080|:3090|:3000|:4000' | wc -l
+```
+
+## 5. 포트/엔드포인트 응답 확인
+
+```verify expect=0 timeout=15
+# 서비스별 포트 매핑
+case "{{service_name}}" in
+  my-api)      PORT=4000 ;;
+  my-backend)  PORT=3080 ;;
+  my-frontend) PORT=3090 ;;
+  my-worker)   PORT=3100 ;;
+  *)           PORT=3000 ;;
+esac
+curl -sf --max-time 5 "http://localhost:${PORT}/health" > /dev/null 2>&1 || \
+curl -sf --max-time 5 "http://localhost:${PORT}/" > /dev/null 2>&1
+```
+
+## 6. Low/Medium: 자동 재시작
+
+```sh run if={{severity}}=low timeout=30
+echo "=== [LOW] 자동 재시작 시도 ===" && \
+pm2 restart {{service_name}} && \
+sleep 3 && \
+pm2 describe {{service_name}} | grep -E 'status|pid|restart'
+```
+
+```sh run if={{severity}}=medium timeout=30
+echo "=== [MEDIUM] 자동 재시작 시도 ===" && \
+pm2 restart {{service_name}} && \
+sleep 5 && \
+pm2 describe {{service_name}} | grep -E 'status|pid|restart|memory'
+```
+
+## 7. High/Critical: 승인 후 조치
+
+```sh run if={{severity}}=high approve timeout=60
+echo "=== [HIGH] 승인된 재시작 ===" && \
+pm2 stop {{service_name}} && \
+sleep 2 && \
+pm2 start {{service_name}} && \
+echo "재시작 완료: $(date '+%Y-%m-%d %H:%M:%S')"
+```
+
+```sh run if={{severity}}=critical approve timeout=120
+echo "=== [CRITICAL] 긴급 복구 시작 ===" && \
+echo "시간: $(date '+%Y-%m-%d %H:%M:%S')" && \
+pm2 stop {{service_name}} && \
+# 임시 방편: 로그 로테이션 + 재시작
+pm2 flush {{service_name}} 2>/dev/null && \
+sleep 3 && \
+pm2 start {{service_name}} && \
+echo "긴급 복구 완료"
+```
+
+## 8. AI 근본 원인 분석
+
+```ai model=gpt-4o
+서버 장애 대응 분석 — {{service_name}} (심각도: {{severity}})
+
+수집된 데이터:
+{{$prev}}
+
+한국어로 분석해주세요:
+1. 장애 근본 원인 (RCA) — 상위 2가지 가능성
+2. 현재 서비스 복구 여부 판단
+3. 재발 방지 대책 (단기/장기)
+4. 에스컬레이션 필요 여부 ({{severity}} 기준)
+```
+
+## 9. 복구 후 검증
+
+```verify expect=0 timeout=20
+sleep 5 && pm2 pid {{service_name}} > /dev/null 2>&1
+```
+
+## 10. 사후 기록 생성
+
+```sh run timeout=10
+REPORT_FILE="/tmp/incident-$(date +%Y%m%d_%H%M%S)-{{service_name}}.txt"
+echo "=== 장애 대응 완료 보고서 ===" > "$REPORT_FILE"
+echo "서비스: {{service_name}}" >> "$REPORT_FILE"
+echo "심각도: {{severity}}" >> "$REPORT_FILE"
+echo "종료시간: $(date '+%Y-%m-%d %H:%M:%S KST')" >> "$REPORT_FILE"
+pm2 describe {{service_name}} 2>/dev/null | grep -E 'status|restart|uptime' >> "$REPORT_FILE"
+echo "=== 보고서 저장: $REPORT_FILE ==="
+cat "$REPORT_FILE"
+```
+
+> src: https://sre.google/workbook/incident-response/
+> src: https://pm2.keymetrics.io/docs/usage/quick-start/

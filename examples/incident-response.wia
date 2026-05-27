@@ -1,0 +1,47 @@
+---
+wia: "1"
+title: 장애 대응 런북
+lang: ko
+agent:
+  role: SRE Engineer
+  rules:
+    - 파괴적 명령 실행 전 반드시 확인
+    - 복구 후 검증 필수
+inputs:
+  service_name: { type: enum, of: [my-api, my-worker, my-frontend, my-backend], default: my-api }
+---
+
+# 장애 대응: {{service_name}}
+
+## 1. 현재 상태 확인
+
+```sh run
+pm2 describe {{service_name}} 2>/dev/null | head -15
+```
+
+## 2. 최근 로그 확인
+
+```sh run
+pm2 logs {{service_name}} --nostream --lines 20 2>/dev/null
+```
+
+## 3. 서비스 재시작
+
+```sh run approve
+pm2 restart {{service_name}}
+```
+
+> src: https://pm2.keymetrics.io/docs/usage/quick-start/
+
+## 4. 재시작 후 검증
+
+```verify expect=0
+sleep 3 && pm2 pid {{service_name}} > /dev/null 2>&1
+```
+
+## 5. AI 분석
+
+```ai model=gpt-4o
+위 로그를 분석해서 장애 원인을 한 줄로 요약해줘.
+이전 블록 출력: {{$prev}}
+```
