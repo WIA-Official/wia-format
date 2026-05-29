@@ -1,0 +1,71 @@
+---
+wia: "1"
+title: PostgreSQL 설치 및 사용자 생성
+agent: soomy
+inputs:
+  db_name: { type: string, default: "appdb" }
+  db_user: { type: string, default: "appuser" }
+  db_pass: { type: secret, default: "" }
+---
+
+# PostgreSQL 설치 및 사용자 생성
+
+## 1. PostgreSQL 패키지 설치
+
+```sh run
+sudo dnf install -y postgresql15-server postgresql15
+```
+
+## 2. 데이터베이스 초기화 및 서비스 시작
+
+```sh run
+sudo postgresql-setup --initdb 2>/dev/null || true
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+```
+
+## 3. 사용자 및 데이터베이스 생성
+
+```sh run
+sudo -u postgres psql <<SQL
+CREATE USER {{db_user}} WITH ENCRYPTED PASSWORD '{{db_pass}}';
+CREATE DATABASE {{db_name}} OWNER {{db_user}};
+GRANT ALL PRIVILEGES ON DATABASE {{db_name}} TO {{db_user}};
+SQL
+```
+
+## 4. pg_hba.conf 인증 설정
+
+```sh run
+PG_HBA=$(sudo -u postgres psql -t -c "SHOW hba_file;" | xargs)
+sudo cp "$PG_HBA" "${PG_HBA}.bak"
+sudo sed -i 's/ident/scram-sha-256/g' "$PG_HBA"
+sudo systemctl reload postgresql
+```
+
+## 5. 성능 기본 튜닝
+
+```sh run
+PG_CONF=$(sudo -u postgres psql -t -c "SHOW config_file;" | xargs)
+sudo tee -a "$PG_CONF" > /dev/null <<EOF
+
+# Performance tuning
+shared_buffers = 256MB
+effective_cache_size = 768MB
+work_mem = 4MB
+maintenance_work_mem = 64MB
+EOF
+sudo systemctl restart postgresql
+```
+
+## 6. 검증
+
+```verify expect=0
+PGPASSWORD='{{db_pass}}' psql -U {{db_user}} -d {{db_name}} -h 127.0.0.1 -c "SELECT current_database(), current_user;" | grep -q {{db_name}}
+```
+
+## 7. AI 분석
+
+```ai
+PostgreSQL 설치 결과를 분석하세요. 데이터베이스 {{db_name}}과 사용자 {{db_user}}가 정상 생성되었는지, 인증 방식이 scram-sha-256으로 변경되었는지, 성능 튜닝 파라미터가 서버 사양에 적합한지 평가하세요.
+```

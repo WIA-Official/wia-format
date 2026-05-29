@@ -1,0 +1,98 @@
+---
+wia: "1"
+title: Docker 및 Docker Compose 자동 설치
+agent: soomy
+inputs:
+  install_dir: { type: string, default: "/usr/local/bin" }
+---
+
+# Docker 및 Docker Compose 자동 설치
+
+## 1. OS 감지
+
+```sh run
+. /etc/os-release 2>/dev/null && echo "OS=$ID VERSION=$VERSION_ID" || echo "OS=unknown"
+```
+
+## 2. 기존 Docker 설치 확인
+
+```sh run
+if command -v docker &>/dev/null; then
+  echo "Docker already installed: $(docker --version)"
+else
+  echo "Docker not found, proceeding with installation"
+fi
+```
+
+## 3. Docker 엔진 설치
+
+```sh run
+if command -v docker &>/dev/null; then
+  echo "SKIP: Docker already installed"
+  exit 0
+fi
+. /etc/os-release
+case "$ID" in
+  ubuntu|debian)
+    sudo apt-get update -y
+    sudo apt-get install -y ca-certificates curl gnupg lsb-release
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/$ID/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$ID $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+    sudo apt-get update -y
+    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    ;;
+  amzn|rhel|centos|fedora)
+    sudo yum install -y yum-utils
+    sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+    sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    ;;
+  *)
+    echo "Unsupported OS: $ID" && exit 1
+    ;;
+esac
+```
+
+## 4. Docker 서비스 시작 및 자동 실행 설정
+
+```sh run
+sudo systemctl enable docker
+sudo systemctl start docker
+sudo usermod -aG docker $USER
+echo "Docker service enabled and started"
+```
+
+## 5. Docker Compose 독립 실행 파일 설치
+
+```sh run
+if command -v docker-compose &>/dev/null; then
+  echo "SKIP: docker-compose already installed: $(docker-compose --version)"
+  exit 0
+fi
+COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep tag_name | cut -d '"' -f4)
+sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o {{install_dir}}/docker-compose
+sudo chmod +x {{install_dir}}/docker-compose
+echo "Installed docker-compose ${COMPOSE_VERSION}"
+```
+
+## 6. 설치 검증
+
+```verify expect=0
+docker --version && docker compose version
+```
+
+## 7. Docker 데몬 상태 검증
+
+```verify expect=0
+sudo systemctl is-active docker
+```
+
+## 8. AI 분석
+
+```ai
+위 설치 과정의 로그를 분석하여 다음을 확인해 주세요:
+1. Docker 엔진과 Docker Compose가 정상 설치되었는지
+2. Docker 데몬이 정상 동작 중인지
+3. 현재 사용자가 docker 그룹에 추가되었는지 (재로그인 필요 여부)
+4. 보안 권장 사항이 있는지
+```

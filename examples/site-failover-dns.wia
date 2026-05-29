@@ -1,0 +1,164 @@
+---
+wia: "1"
+title: DNS 기반 사이트 페일오버
+agent: soomy
+inputs:
+  primary_ip: { type: string }
+  secondary_ip: { type: string }
+  domain: { type: string }
+---
+
+# DNS 기반 사이트 페일오버
+
+## 1. 현재 DNS 레코드 확인
+
+```sh run
+echo "=== {{domain}} DNS 현재 상태 ==="
+echo "--- A 레코드 ---"
+dig +short {{domain}} A
+echo "--- NS 레코드 ---"
+dig +short {{domain}} NS
+echo "--- TTL 확인 ---"
+dig {{domain}} A | grep -E "^{{domain}}" | head -3
+echo ""
+echo "=== 현재 활성 IP 확인 ==="
+CURRENT_IP=$(dig +short {{domain}} A | head -1)
+echo "현재 IP: $CURRENT_IP"
+echo "Primary: {{primary_ip}}"
+echo "Secondary: {{secondary_ip}}"
+```
+
+## 2. Primary/Secondary 서버 헬스체크
+
+```sh run
+echo "=== Primary 서버 ({{primary_ip}}) 상태 ==="
+curl -sf -o /dev/null -w "HTTP %{http_code}, 응답시간: %{time_total}s" --connect-timeout 5 "http://{{primary_ip}}" 2>/dev/null || echo "응답 없음"
+echo ""
+ping -c 3 -W 2 {{primary_ip}} 2>/dev/null | tail -2
+
+echo ""
+echo "=== Secondary 서버 ({{secondary_ip}}) 상태 ==="
+curl -sf -o /dev/null -w "HTTP %{http_code}, 응답시간: %{time_total}s" --connect-timeout 5 "http://{{secondary_ip}}" 2>/dev/null || echo "응답 없음"
+echo ""
+ping -c 3 -W 2 {{secondary_ip}} 2>/dev/null | tail -2
+```
+
+## 3. Route 53 헬스체크 설정 (AWS 환경)
+
+```sh run
+echo "=== Route 53 헬스체크 생성 ==="
+HC_PRIMARY=$(aws route53 create-health-check \
+  --caller-reference "{{domain}}-primary-$(date +%s)" \
+  --health-check-config "{
+    \"IPAddress\": \"{{primary_ip}}\",
+    \"Port\": 80,
+    \"Type\": \"HTTP\",
+    \"ResourcePath\": \"/health\",
+    \"FullyQualifiedDomainName\": \"{{domain}}\",
+    \"RequestInterval\": 10,
+    \"FailureThreshold\": 3
+  }" --query 'HealthCheck.Id' --output text 2>&1)
+echo "Primary 헬스체크 ID: $HC_PRIMARY"
+
+HC_SECONDARY=$(aws route53 create-health-check \
+  --caller-reference "{{domain}}-secondary-$(date +%s)" \
+  --health-check-config "{
+    \"IPAddress\": \"{{secondary_ip}}\",
+    \"Port\": 80,
+    \"Type\": \"HTTP\",
+    \"ResourcePath\": \"/health\",
+    \"FullyQualifiedDomainName\": \"{{domain}}\",
+    \"RequestInterval\": 10,
+    \"FailureThreshold\": 3
+  }" --query 'HealthCheck.Id' --output text 2>&1)
+echo "Secondary 헬스체크 ID: $HC_SECONDARY"
+```
+
+## 4. DNS Failover 레코드 설정
+
+```sh run
+HOSTED_ZONE_ID=$(aws route53 list-hosted-zones-by-name \
+  --dns-name "{{domain}}" \
+  --query 'HostedZones[0].Id' --output text 2>/dev/null | sed 's|/hostedzone/||')
+echo "Hosted Zone ID: $HOSTED_ZONE_ID"
+
+HC_PRIMARY=$(aws route53 list-health-checks --query "HealthChecks[?HealthCheckConfig.IPAddress=='{{primary_ip}}'].Id" --output text 2>/dev/null | head -1)
+
+if [ -n "$HOSTED_ZONE_ID" ] && [ "$HOSTED_ZONE_ID" != "None" ]; then
+  aws route53 change-resource-record-sets \
+    --hosted-zone-id $HOSTED_ZONE_ID \
+    --change-batch "{
+      \"Changes\": [
+        {
+          \"Action\": \"UPSERT\",
+          \"ResourceRecordSet\": {
+            \"Name\": \"{{domain}}\",
+            \"Type\": \"A\",
+            \"SetIdentifier\": \"primary\",
+            \"Failover\": \"PRIMARY\",
+            \"TTL\": 60,
+            \"ResourceRecords\": [{\"Value\": \"{{primary_ip}}\"}],
+            \"HealthCheckId\": \"$HC_PRIMARY\"
+          }
+        },
+        {
+          \"Action\": \"UPSERT\",
+          \"ResourceRecordSet\": {
+            \"Name\": \"{{domain}}\",
+            \"Type\": \"A\",
+            \"SetIdentifier\": \"secondary\",
+            \"Failover\": \"SECONDARY\",
+            \"TTL\": 60,
+            \"ResourceRecords\": [{\"Value\": \"{{secondary_ip}}\"}]
+          }
+        }
+      ]
+    }" 2>&1
+  echo "DNS Failover 레코드 설정 완료"
+else
+  echo "Hosted Zone 없음 - 수동 DNS 설정 필요"
+  echo "대안: /etc/hosts 또는 로컬 DNS에서 수동 전환"
+fi
+```
+
+## 5. 페일오버 시뮬레이션 테스트
+
+```sh run
+echo "=== 페일오버 시뮬레이션 ==="
+echo "1. 현재 DNS 해석:"
+dig +short {{domain}} A
+echo ""
+echo "2. Primary ({{primary_ip}}) 응답 확인:"
+curl -sf --connect-timeout 5 -H "Host: {{domain}}" "http://{{primary_ip}}/health" 2>/dev/null && echo "정상" || echo "실패"
+echo ""
+echo "3. Secondary ({{secondary_ip}}) 응답 확인:"
+curl -sf --connect-timeout 5 -H "Host: {{domain}}" "http://{{secondary_ip}}/health" 2>/dev/null && echo "정상" || echo "실패"
+echo ""
+echo "4. DNS TTL 확인 (낮을수록 빠른 페일오버):"
+dig {{domain}} A | grep -E "IN\s+A" | awk '{print "TTL:", $2, "초"}'
+```
+
+## 6. 검증
+
+```verify expect=0
+echo "=== 페일오버 준비 상태 검증 ==="
+PRIMARY_OK=$(curl -sf --connect-timeout 5 -o /dev/null -w "%{http_code}" "http://{{primary_ip}}" 2>/dev/null)
+SECONDARY_OK=$(curl -sf --connect-timeout 5 -o /dev/null -w "%{http_code}" "http://{{secondary_ip}}" 2>/dev/null)
+echo "Primary ({{primary_ip}}): HTTP $PRIMARY_OK"
+echo "Secondary ({{secondary_ip}}): HTTP $SECONDARY_OK"
+DNS_IP=$(dig +short {{domain}} A | head -1)
+echo "현재 DNS 해석 IP: $DNS_IP"
+test "$DNS_IP" = "{{primary_ip}}" && echo "DNS가 Primary를 가리킴 - 정상" || echo "DNS가 $DNS_IP를 가리킴 - 확인 필요"
+```
+
+## 7. AI 분석
+
+```ai
+{{domain}} DNS 페일오버 설정 결과를 분석해 주세요:
+- Primary ({{primary_ip}}) / Secondary ({{secondary_ip}}) 서버 가용성
+- DNS TTL 값이 페일오버 속도에 미치는 영향 (현재 60초)
+- Route 53 헬스체크 설정 (10초 간격, 3회 실패) 적절성
+- 페일오버 시 세션/데이터 동기화 고려사항
+- 페일백(failback) 전략: 자동 vs 수동
+- 다중 리전 DR 구성 시 추가 고려사항 (Global Accelerator, CloudFront 등)
+```

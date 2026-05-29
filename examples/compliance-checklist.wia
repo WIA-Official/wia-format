@@ -1,0 +1,157 @@
+---
+wia: "1"
+title: 보안 컴플라이언스 체크리스트 SOC2/ISO27001 기본
+agent: soomy
+inputs: {}
+---
+
+# 보안 컴플라이언스 체크리스트 SOC2/ISO27001 기본
+
+## 1. 접근 제어 (Access Control) 점검
+
+```sh run
+echo "=== A.1 비밀번호 정책 ==="
+grep -E "^(PASS_MAX_DAYS|PASS_MIN_DAYS|PASS_MIN_LEN|PASS_WARN_AGE)" /etc/login.defs 2>/dev/null
+echo ""
+echo "=== A.2 sudoers 설정 ==="
+sudo grep -v "^#\|^$" /etc/sudoers 2>/dev/null | head -20
+echo ""
+echo "=== A.3 SSH 설정 ==="
+grep -E "^(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|MaxAuthTries|AllowUsers|AllowGroups)" /etc/ssh/sshd_config 2>/dev/null
+echo ""
+echo "=== A.4 사용자 계정 (UID >= 1000) ==="
+awk -F: '$3 >= 1000 && $1 != "nobody" {print $1, "UID:"$3, "Shell:"$7}' /etc/passwd
+echo ""
+echo "=== A.5 빈 비밀번호 계정 ==="
+sudo awk -F: '($2 == "" ) {print $1}' /etc/shadow 2>/dev/null || echo "확인 불가"
+```
+
+## 2. 로깅 및 모니터링 (Logging & Monitoring) 점검
+
+```sh run
+echo "=== B.1 auditd 상태 ==="
+systemctl is-active auditd 2>/dev/null || echo "auditd 미설치/미실행"
+sudo auditctl -l 2>/dev/null | head -10 || echo "감사 규칙 없음"
+echo ""
+echo "=== B.2 로그 보존 설정 ==="
+grep -E "^(rotate|weekly|monthly|maxsize)" /etc/logrotate.conf 2>/dev/null
+echo ""
+echo "=== B.3 rsyslog/journald 상태 ==="
+systemctl is-active rsyslog 2>/dev/null || echo "rsyslog 미실행"
+systemctl is-active systemd-journald 2>/dev/null
+echo ""
+echo "=== B.4 실패한 로그인 시도 ==="
+sudo lastb 2>/dev/null | tail -5 || echo "lastb 불가"
+echo "총 실패 로그인: $(sudo lastb 2>/dev/null | wc -l)건"
+```
+
+## 3. 네트워크 보안 (Network Security) 점검
+
+```sh run
+echo "=== C.1 방화벽 상태 ==="
+sudo iptables -L -n --line-numbers 2>/dev/null | head -20 || echo "iptables 미설정"
+sudo nft list ruleset 2>/dev/null | head -20 || echo "nftables 미설정"
+echo ""
+echo "=== C.2 불필요한 리스닝 포트 ==="
+sudo ss -tlnp | awk 'NR>1{print}' | sort
+echo ""
+echo "=== C.3 IPv6 상태 ==="
+sysctl net.ipv6.conf.all.disable_ipv6 2>/dev/null
+echo ""
+echo "=== C.4 ICMP 리다이렉트 비활성화 ==="
+sysctl net.ipv4.conf.all.accept_redirects 2>/dev/null
+sysctl net.ipv4.conf.all.send_redirects 2>/dev/null
+```
+
+## 4. 데이터 보호 (Data Protection) 점검
+
+```sh run
+echo "=== D.1 디스크 암호화 ==="
+lsblk -o NAME,FSTYPE,MOUNTPOINT,SIZE | head -15
+sudo dmsetup status 2>/dev/null | head -5 || echo "LUKS 미사용"
+echo ""
+echo "=== D.2 TLS/SSL 인증서 만료 확인 ==="
+for cert in /etc/ssl/certs/*.pem /etc/letsencrypt/live/*/cert.pem; do
+  if [ -f "$cert" ]; then
+    EXPIRY=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2)
+    [ -n "$EXPIRY" ] && echo "  $cert: $EXPIRY"
+  fi
+done 2>/dev/null | head -10
+echo ""
+echo "=== D.3 백업 상태 ==="
+ls -lht /var/backups/ 2>/dev/null | head -5 || echo "기본 백업 디렉터리 없음"
+echo ""
+echo "=== D.4 민감 파일 권한 ==="
+ls -la /etc/shadow /etc/gshadow /etc/passwd /etc/group 2>/dev/null
+stat -c "%a %U:%G %n" /etc/ssh/ssh_host_*_key 2>/dev/null
+```
+
+## 5. 시스템 무결성 (System Integrity) 점검
+
+```sh run
+echo "=== E.1 패키지 업데이트 현황 ==="
+sudo dnf check-update --security 2>/dev/null | tail -20 || sudo yum check-update --security 2>/dev/null | tail -20 || sudo apt list --upgradable 2>/dev/null | head -20
+echo ""
+echo "=== E.2 SUID/SGID 파일 ==="
+sudo find / -type f \( -perm -4000 -o -perm -2000 \) -exec ls -la {} \; 2>/dev/null | head -15
+echo ""
+echo "=== E.3 world-writable 파일 ==="
+sudo find /etc /usr -xdev -type f -perm -0002 2>/dev/null | head -10 || echo "없음"
+echo ""
+echo "=== E.4 무인 프로세스 확인 ==="
+ps aux | awk '$1 == "nobody" || $1 == "www-data" {print}' | head -10
+```
+
+## 6. 검증
+
+```verify expect=0
+SCORE=0
+TOTAL=8
+
+# SSH root 로그인 비활성화
+grep -q "^PermitRootLogin no" /etc/ssh/sshd_config 2>/dev/null && SCORE=$((SCORE+1)) && echo "PASS: SSH root 로그인 비활성화" || echo "FAIL: SSH root 로그인 허용됨"
+
+# SSH 비밀번호 인증 비활성화
+grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config 2>/dev/null && SCORE=$((SCORE+1)) && echo "PASS: SSH 비밀번호 인증 비활성화" || echo "FAIL: SSH 비밀번호 인증 허용됨"
+
+# 방화벽 활성화
+(sudo iptables -L -n 2>/dev/null | grep -q "ACCEPT\|DROP" || sudo nft list ruleset 2>/dev/null | grep -q "chain") && SCORE=$((SCORE+1)) && echo "PASS: 방화벽 활성화" || echo "FAIL: 방화벽 미설정"
+
+# 빈 비밀번호 없음
+EMPTY_PW=$(sudo awk -F: '($2 == "" ) {print $1}' /etc/shadow 2>/dev/null | wc -l)
+test "$EMPTY_PW" -eq 0 && SCORE=$((SCORE+1)) && echo "PASS: 빈 비밀번호 계정 없음" || echo "FAIL: 빈 비밀번호 계정 ${EMPTY_PW}개"
+
+# shadow 파일 권한
+SHADOW_PERM=$(stat -c "%a" /etc/shadow 2>/dev/null)
+test "$SHADOW_PERM" = "000" -o "$SHADOW_PERM" = "640" -o "$SHADOW_PERM" = "600" && SCORE=$((SCORE+1)) && echo "PASS: /etc/shadow 권한 적절" || echo "FAIL: /etc/shadow 권한 $SHADOW_PERM"
+
+# 로그 서비스 활성
+systemctl is-active rsyslog &>/dev/null || systemctl is-active systemd-journald &>/dev/null && SCORE=$((SCORE+1)) && echo "PASS: 로깅 서비스 활성" || echo "FAIL: 로깅 서비스 비활성"
+
+# 보안 업데이트
+sudo dnf check-update --security 2>/dev/null; UPD=$?
+test "$UPD" -eq 0 && SCORE=$((SCORE+1)) && echo "PASS: 보안 업데이트 최신" || echo "WARN: 보안 업데이트 필요 (exit $UPD)"
+
+# SSH 키 권한
+SSH_KEY_OK=true
+for key in /etc/ssh/ssh_host_*_key; do
+  PERM=$(stat -c "%a" "$key" 2>/dev/null)
+  test "$PERM" = "600" || SSH_KEY_OK=false
+done
+$SSH_KEY_OK && SCORE=$((SCORE+1)) && echo "PASS: SSH 호스트 키 권한 적절" || echo "FAIL: SSH 호스트 키 권한 부적절"
+
+echo ""
+echo "=== 컴플라이언스 점수: $SCORE / $TOTAL ==="
+```
+
+## 7. AI 분석
+
+```ai
+보안 컴플라이언스 체크리스트 결과를 종합 분석해 주세요:
+- SOC 2 Trust Services Criteria (보안, 가용성, 처리 무결성, 기밀성, 개인정보) 관점 평가
+- ISO 27001 Annex A 관점에서 미충족 항목
+- 컴플라이언스 점수 기반 우선 개선 항목 도출
+- 감사 증거(evidence) 수집 자동화 방안
+- 지속적 컴플라이언스 모니터링 도구 (Chef InSpec, OpenSCAP 등) 도입 권장
+- 다음 감사 대비 즉시 조치해야 할 항목 우선순위
+```

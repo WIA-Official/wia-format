@@ -1,0 +1,105 @@
+---
+wia: "1"
+title: 열린 포트 스캔 및 불필요 포트 차단
+agent: soomy
+inputs:
+  allowed_ports: { type: string, default: "22,80,443" }
+---
+
+# 열린 포트 스캔 및 불필요 포트 차단
+
+## 1. 현재 열린 포트 스캔
+
+```sh run
+echo "=== LISTEN 상태 포트 ==="
+sudo ss -tlnp | grep LISTEN
+echo ""
+echo "=== 외부 접근 가능 포트 (0.0.0.0 / ::) ==="
+sudo ss -tlnp | grep -E "0\.0\.0\.0|:::" | awk '{print $4, $6}'
+```
+
+## 2. 허용 포트와 비교 분석
+
+```sh run
+ALLOWED="{{allowed_ports}}"
+echo "허용 포트: $ALLOWED"
+echo ""
+echo "=== 비허용 포트 목록 ==="
+sudo ss -tlnp | grep -E "0\.0\.0\.0|:::" | awk '{print $4}' | grep -oE '[0-9]+$' | while read port; do
+  if ! echo ",$ALLOWED," | grep -q ",$port,"; then
+    service=$(sudo ss -tlnp | grep ":$port " | awk '{print $6}' | head -1)
+    echo "PORT $port - $service"
+  fi
+done
+```
+
+## 3. 방화벽 현재 규칙 확인
+
+```sh run
+if command -v firewall-cmd &>/dev/null; then
+  echo "=== firewalld ==="
+  sudo firewall-cmd --list-all 2>/dev/null
+elif command -v ufw &>/dev/null; then
+  echo "=== ufw ==="
+  sudo ufw status verbose
+else
+  echo "=== iptables ==="
+  sudo iptables -L -n --line-numbers 2>/dev/null
+fi
+```
+
+## 4. 허용 포트만 방화벽에 등록
+
+```sh run
+ALLOWED="{{allowed_ports}}"
+if command -v firewall-cmd &>/dev/null; then
+  sudo systemctl enable --now firewalld
+  IFS=',' read -ra PORTS <<< "$ALLOWED"
+  for port in "${PORTS[@]}"; do
+    sudo firewall-cmd --permanent --add-port=${port}/tcp
+  done
+  sudo firewall-cmd --reload
+  echo "firewalld 규칙 적용 완료"
+elif command -v ufw &>/dev/null; then
+  sudo ufw default deny incoming
+  IFS=',' read -ra PORTS <<< "$ALLOWED"
+  for port in "${PORTS[@]}"; do
+    sudo ufw allow ${port}/tcp
+  done
+  sudo ufw --force enable
+  echo "ufw 규칙 적용 완료"
+else
+  echo "방화벽 도구 없음 — 수동 iptables 설정 필요"
+fi
+```
+
+## 5. 검증
+
+```verify expect=0
+ALLOWED="{{allowed_ports}}"
+unauthorized=0
+sudo ss -tlnp | grep -E "0\.0\.0\.0|:::" | awk '{print $4}' | grep -oE '[0-9]+$' | while read port; do
+  if ! echo ",$ALLOWED," | grep -q ",$port,"; then
+    unauthorized=1
+  fi
+done
+exit $unauthorized
+```
+
+## 6. 보안 그룹 / 클라우드 방화벽 참고
+
+```sh run
+echo "=== 인스턴스 메타데이터 ==="
+TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null)
+curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/security-groups 2>/dev/null || echo "메타데이터 접근 불가 (비AWS 환경)"
+echo ""
+echo "NOTE: 클라우드 보안 그룹은 별도로 확인하세요."
+```
+
+## 7. AI 분석
+
+```ai
+포트 스캔 결과를 분석하세요. 허용 포트: {{allowed_ports}}.
+비허용 포트 중 즉시 차단해야 할 위험 포트와, 서비스 운영에 필요할 수 있는 포트를 구분하세요.
+OS 방화벽과 클라우드 보안 그룹 양쪽 모두 점검이 필요한 사항을 정리해 주세요.
+```

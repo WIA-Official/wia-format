@@ -1,0 +1,62 @@
+---
+wia: "1"
+title: Git 베어 레포 및 post-receive 훅 설정
+agent: soomy
+inputs:
+  repo_name: { type: string, default: "my-project" }
+---
+
+# Git 베어 레포 및 post-receive 훅 설정
+
+## 1. Git 설치 확인
+
+```sh run
+git --version || sudo dnf install -y git
+```
+
+## 2. 베어 레포지토리 생성
+
+```sh run
+sudo mkdir -p /opt/git/{{repo_name}}.git
+cd /opt/git/{{repo_name}}.git && sudo git init --bare
+sudo chown -R ec2-user:ec2-user /opt/git/{{repo_name}}.git
+```
+
+## 3. post-receive 훅 생성
+
+```sh run
+cat > /opt/git/{{repo_name}}.git/hooks/post-receive << 'HOOK'
+#!/bin/bash
+DEPLOY_DIR="/var/www/{{repo_name}}"
+BRANCH="main"
+
+while read oldrev newrev ref; do
+  if [ "$ref" = "refs/heads/$BRANCH" ]; then
+    echo "=== Deploying $BRANCH to $DEPLOY_DIR ==="
+    mkdir -p "$DEPLOY_DIR"
+    git --work-tree="$DEPLOY_DIR" --git-dir="$(pwd)" checkout -f "$BRANCH"
+    echo "=== Deploy complete: $(date) ==="
+  fi
+done
+HOOK
+chmod +x /opt/git/{{repo_name}}.git/hooks/post-receive
+```
+
+## 4. 배포 디렉토리 준비
+
+```sh run
+sudo mkdir -p /var/www/{{repo_name}}
+sudo chown -R ec2-user:ec2-user /var/www/{{repo_name}}
+```
+
+## 5. 검증
+
+```verify expect=0
+test -x /opt/git/{{repo_name}}.git/hooks/post-receive && test -d /opt/git/{{repo_name}}.git/refs && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+Git 베어 레포지토리 {{repo_name}}과 post-receive 훅 설정을 분석해 주세요. 훅 스크립트의 안전성, 권한 설정, 배포 경로 구성을 검토하고, 개선점(롤백, 알림, 로깅)을 제안해 주세요.
+```

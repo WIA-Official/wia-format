@@ -1,0 +1,122 @@
+---
+wia: "1"
+title: AWS IAM 보안 감사
+agent: soomy
+inputs:
+  profile: { type: string, default: "default" }
+---
+
+# AWS IAM 보안 감사
+
+## 1. IAM 사용자 및 MFA 점검
+
+```sh run
+echo "=== IAM 사용자 목록 ==="
+aws iam list-users --profile {{profile}} --query 'Users[*].[UserName,CreateDate,PasswordLastUsed]' --output table 2>&1
+echo ""
+echo "=== MFA 미설정 사용자 ==="
+for user in $(aws iam list-users --profile {{profile}} --query 'Users[*].UserName' --output text 2>/dev/null); do
+  MFA=$(aws iam list-mfa-devices --user-name "$user" --profile {{profile}} --query 'MFADevices' --output text 2>/dev/null)
+  if [ -z "$MFA" ]; then
+    echo "  경고: $user — MFA 미설정"
+  fi
+done
+echo ""
+echo "=== 루트 계정 MFA ==="
+aws iam get-account-summary --profile {{profile}} --query 'SummaryMap.AccountMFAEnabled' --output text 2>&1
+```
+
+## 2. 액세스 키 감사
+
+```sh run
+echo "=== 액세스 키 점검 ==="
+for user in $(aws iam list-users --profile {{profile}} --query 'Users[*].UserName' --output text 2>/dev/null); do
+  KEYS=$(aws iam list-access-keys --user-name "$user" --profile {{profile}} --query 'AccessKeyMetadata[*].[AccessKeyId,Status,CreateDate]' --output text 2>/dev/null)
+  if [ -n "$KEYS" ]; then
+    echo "[$user]"
+    echo "$KEYS" | while read key_id status create_date; do
+      LAST_USED=$(aws iam get-access-key-last-used --access-key-id "$key_id" --profile {{profile}} --query 'AccessKeyLastUsed.LastUsedDate' --output text 2>/dev/null)
+      AGE_DAYS=$(( ($(date +%s) - $(date -d "$create_date" +%s 2>/dev/null || echo $(date +%s))) / 86400 ))
+      echo "  키: $key_id | 상태: $status | 생성: ${AGE_DAYS}일 전 | 마지막 사용: ${LAST_USED:-사용 안 됨}"
+      if [ "$AGE_DAYS" -gt 90 ]; then
+        echo "    경고: 90일 이상 된 키 — 순환 필요"
+      fi
+      if [ "$LAST_USED" = "None" ] || [ "$LAST_USED" = "N/A" ]; then
+        echo "    경고: 사용된 적 없는 키 — 삭제 권고"
+      fi
+    done
+    echo ""
+  fi
+done
+```
+
+## 3. 과도한 권한 정책 점검
+
+```sh run
+echo "=== AdministratorAccess 정책 부여 사용자/그룹 ==="
+for user in $(aws iam list-users --profile {{profile}} --query 'Users[*].UserName' --output text 2>/dev/null); do
+  ADMIN=$(aws iam list-attached-user-policies --user-name "$user" --profile {{profile}} --query 'AttachedPolicies[?PolicyName==`AdministratorAccess`].PolicyName' --output text 2>/dev/null)
+  if [ -n "$ADMIN" ]; then
+    echo "  경고: $user — AdministratorAccess 직접 부여"
+  fi
+done
+echo ""
+echo "=== 인라인 정책이 있는 사용자 ==="
+for user in $(aws iam list-users --profile {{profile}} --query 'Users[*].UserName' --output text 2>/dev/null); do
+  INLINE=$(aws iam list-user-policies --user-name "$user" --profile {{profile}} --query 'PolicyNames' --output text 2>/dev/null)
+  if [ -n "$INLINE" ]; then
+    echo "  $user: $INLINE"
+  fi
+done
+echo ""
+echo "=== 와일드카드(*) 액션 정책 ==="
+for policy_arn in $(aws iam list-policies --scope Local --profile {{profile}} --query 'Policies[*].Arn' --output text 2>/dev/null | head -10); do
+  VER=$(aws iam get-policy --policy-arn "$policy_arn" --profile {{profile}} --query 'Policy.DefaultVersionId' --output text 2>/dev/null)
+  DOC=$(aws iam get-policy-version --policy-arn "$policy_arn" --version-id "$VER" --profile {{profile}} --query 'PolicyVersion.Document' --output json 2>/dev/null)
+  if echo "$DOC" | grep -q '"Action": "\*"'; then
+    echo "  경고: $(basename $policy_arn) — 와일드카드 액션 사용"
+  fi
+done
+```
+
+## 4. 비활성 사용자 및 역할 점검
+
+```sh run
+echo "=== 90일 이상 비활성 사용자 ==="
+for user in $(aws iam list-users --profile {{profile}} --query 'Users[*].UserName' --output text 2>/dev/null); do
+  LAST=$(aws iam get-user --user-name "$user" --profile {{profile}} --query 'User.PasswordLastUsed' --output text 2>/dev/null)
+  if [ -n "$LAST" ] && [ "$LAST" != "None" ]; then
+    DAYS_AGO=$(( ($(date +%s) - $(date -d "$LAST" +%s 2>/dev/null || echo $(date +%s))) / 86400 ))
+    if [ "$DAYS_AGO" -gt 90 ]; then
+      echo "  $user: ${DAYS_AGO}일 전 마지막 로그인"
+    fi
+  fi
+done
+echo ""
+echo "=== IAM 계정 요약 ==="
+aws iam get-account-summary --profile {{profile}} --output table 2>&1
+```
+
+## 5. 패스워드 정책 확인
+
+```sh run
+echo "=== 패스워드 정책 ==="
+aws iam get-account-password-policy --profile {{profile}} --output table 2>&1 || echo "패스워드 정책 미설정 — 설정 강력 권고"
+```
+
+## 6. 검증
+
+```verify expect=0
+aws iam get-account-summary --profile {{profile}} --query 'SummaryMap.AccountMFAEnabled' --output text 2>/dev/null | grep -q '1'
+```
+
+## 7. AI 분석
+
+```ai
+AWS IAM 보안 감사 결과를 분석해 주세요:
+1. MFA 미설정 사용자 목록 및 조치 우선순위
+2. 오래되거나 미사용 액세스 키 정리 계획
+3. 과도한 권한(AdministratorAccess, 와일드카드) 개선 방안
+4. 비활성 사용자 처리 권고
+5. IAM 보안 점수 및 종합 개선 로드맵
+```

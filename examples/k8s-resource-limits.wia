@@ -1,0 +1,139 @@
+---
+wia: "1"
+title: 리소스 제한 설정 (CPU/Memory requests, limits, LimitRange, ResourceQuota)
+agent: soomy
+inputs:
+  namespace: { type: string, default: "default" }
+  cpu_limit: { type: string, default: "500m" }
+  mem_limit: { type: string, default: "512Mi" }
+---
+
+# 리소스 제한 설정 (CPU/Memory requests, limits, LimitRange, ResourceQuota)
+
+## 1. 현재 네임스페이스 리소스 사용량 확인
+
+```sh run
+echo "=== 네임스페이스 {{namespace}} 리소스 현황 ==="
+kubectl top pods -n {{namespace}} 2>/dev/null || echo "metrics-server 미설치"
+echo ""
+echo "=== 기존 리소스 제한 확인 ==="
+kubectl get limitrange -n {{namespace}} 2>/dev/null || echo "LimitRange 없음"
+kubectl get resourcequota -n {{namespace}} 2>/dev/null || echo "ResourceQuota 없음"
+echo ""
+echo "=== Pod별 리소스 설정 현황 ==="
+kubectl get pods -n {{namespace}} -o custom-columns="NAME:.metadata.name,CPU_REQ:.spec.containers[0].resources.requests.cpu,CPU_LIM:.spec.containers[0].resources.limits.cpu,MEM_REQ:.spec.containers[0].resources.requests.memory,MEM_LIM:.spec.containers[0].resources.limits.memory"
+```
+
+## 2. LimitRange 설정
+
+```sh run
+cat <<LIMITRANGE | kubectl apply -n {{namespace}} -f -
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: resource-limits
+  namespace: {{namespace}}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "{{cpu_limit}}"
+        memory: "{{mem_limit}}"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      max:
+        cpu: "2"
+        memory: "2Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+    - type: Pod
+      max:
+        cpu: "4"
+        memory: "4Gi"
+LIMITRANGE
+echo "LimitRange 설정 완료"
+kubectl describe limitrange resource-limits -n {{namespace}}
+```
+
+## 3. ResourceQuota 설정
+
+```sh run
+cat <<QUOTA | kubectl apply -n {{namespace}} -f -
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: namespace-quota
+  namespace: {{namespace}}
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    pods: "20"
+    services: "10"
+    persistentvolumeclaims: "10"
+    configmaps: "20"
+    secrets: "20"
+QUOTA
+echo "ResourceQuota 설정 완료"
+kubectl describe resourcequota namespace-quota -n {{namespace}}
+```
+
+## 4. 테스트 Pod로 리소스 제한 적용 확인
+
+```sh run
+echo "=== 리소스 제한 없는 Pod 생성 (LimitRange 기본값 적용 확인) ==="
+kubectl run test-limits --image=nginx:alpine -n {{namespace}} --restart=Never 2>&1 || echo "이미 존재"
+sleep 3
+echo ""
+echo "=== 적용된 리소스 설정 확인 ==="
+kubectl get pod test-limits -n {{namespace}} -o jsonpath='{.spec.containers[0].resources}' 2>/dev/null | python3 -m json.tool
+echo ""
+echo "=== 초과 리소스 요청 테스트 ==="
+kubectl run test-exceed --image=nginx:alpine -n {{namespace}} --restart=Never \
+  --overrides='{"spec":{"containers":[{"name":"test","image":"nginx:alpine","resources":{"requests":{"cpu":"10","memory":"20Gi"}}}]}}' 2>&1 || echo "예상대로 거부됨 (리소스 초과)"
+kubectl delete pod test-limits test-exceed -n {{namespace}} --ignore-not-found 2>/dev/null
+```
+
+## 5. 노드 리소스 여유 확인
+
+```sh run
+echo "=== 노드별 리소스 할당 현황 ==="
+kubectl top nodes 2>/dev/null || echo "metrics-server 미설치"
+echo ""
+echo "=== 노드 Allocatable vs Allocated ==="
+for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
+  echo "--- $node ---"
+  kubectl describe node $node | grep -A 6 "Allocated resources"
+done
+```
+
+## 6. 검증
+
+```verify expect=0
+echo "=== LimitRange 검증 ==="
+kubectl get limitrange resource-limits -n {{namespace}} -o jsonpath='{.spec.limits[0].default.cpu}' 2>/dev/null
+LR_CPU=$(kubectl get limitrange resource-limits -n {{namespace}} -o jsonpath='{.spec.limits[0].default.cpu}' 2>/dev/null)
+echo "기본 CPU 제한: $LR_CPU (기대: {{cpu_limit}})"
+test "$LR_CPU" = "{{cpu_limit}}" && echo "LimitRange CPU 검증 통과" || echo "LimitRange 불일치"
+
+echo "=== ResourceQuota 검증 ==="
+kubectl get resourcequota namespace-quota -n {{namespace}} -o jsonpath='{.status.hard.pods}' 2>/dev/null
+echo ""
+echo "검증 완료"
+```
+
+## 7. AI 분석
+
+```ai
+네임스페이스 {{namespace}} 리소스 제한 설정 결과를 분석해 주세요:
+- LimitRange 기본값 CPU {{cpu_limit}} / Memory {{mem_limit}}의 적합성
+- ResourceQuota 총량 (CPU 4/8, Memory 8Gi/16Gi, Pods 20)의 적절성
+- 현재 Pod들의 리소스 사용 패턴 대비 설정 여유
+- QoS 클래스 (Guaranteed, Burstable, BestEffort) 분포 권장
+- VPA (Vertical Pod Autoscaler) 도입 검토 필요성
+- OOM Kill 방지를 위한 memory request/limit 비율 권장값
+```

@@ -1,0 +1,105 @@
+---
+wia: "1"
+title: 방화벽 기본 설정
+agent: soomy
+inputs:
+  ssh_port: { type: string, default: "22" }
+  firewall_backend: { type: string, default: "iptables" }
+  allowed_ports: { type: string, default: "80,443" }
+---
+
+# 방화벽 기본 설정
+
+## 1. 현재 방화벽 상태 확인
+
+```sh run
+if command -v firewall-cmd &>/dev/null; then
+  echo "=== firewalld ==="
+  sudo firewall-cmd --state 2>/dev/null || echo "firewalld inactive"
+  sudo firewall-cmd --list-all 2>/dev/null
+fi
+if command -v iptables &>/dev/null; then
+  echo "=== iptables ==="
+  sudo iptables -L -n --line-numbers
+fi
+```
+
+## 2. iptables 기본 규칙 설정
+
+```sh run
+if [ "{{firewall_backend}}" = "iptables" ]; then
+  sudo iptables -F
+  sudo iptables -X
+  sudo iptables -P INPUT DROP
+  sudo iptables -P FORWARD DROP
+  sudo iptables -P OUTPUT ACCEPT
+  sudo iptables -A INPUT -i lo -j ACCEPT
+  sudo iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  echo "iptables default policies applied"
+fi
+```
+
+## 3. SSH/HTTP/HTTPS 포트 허용
+
+```sh run
+if [ "{{firewall_backend}}" = "iptables" ]; then
+  sudo iptables -A INPUT -p tcp --dport {{ssh_port}} -j ACCEPT
+  sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+  sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+  sudo iptables -A INPUT -p icmp --icmp-type echo-request -j ACCEPT
+elif [ "{{firewall_backend}}" = "firewalld" ]; then
+  sudo systemctl enable --now firewalld
+  sudo firewall-cmd --permanent --add-port={{ssh_port}}/tcp
+  sudo firewall-cmd --permanent --add-service=http
+  sudo firewall-cmd --permanent --add-service=https
+  sudo firewall-cmd --reload
+fi
+```
+
+## 4. ICMP rate limiting
+
+```sh run
+if [ "{{firewall_backend}}" = "iptables" ]; then
+  sudo iptables -A INPUT -p icmp --icmp-type echo-request -m limit --limit 1/s --limit-burst 4 -j ACCEPT
+  echo "ICMP rate limiting applied"
+fi
+```
+
+## 5. iptables 규칙 영구 저장
+
+```sh run
+if [ "{{firewall_backend}}" = "iptables" ]; then
+  if command -v netfilter-persistent &>/dev/null; then
+    sudo netfilter-persistent save
+  elif command -v iptables-save &>/dev/null; then
+    sudo iptables-save | sudo tee /etc/iptables.rules
+    echo "iptables-save completed to /etc/iptables.rules"
+  fi
+fi
+```
+
+## 6. 최종 규칙 목록 출력
+
+```sh run
+if [ "{{firewall_backend}}" = "iptables" ]; then
+  sudo iptables -L -n -v --line-numbers
+elif [ "{{firewall_backend}}" = "firewalld" ]; then
+  sudo firewall-cmd --list-all
+fi
+```
+
+## 7. 검증
+
+```verify expect=0
+if [ "{{firewall_backend}}" = "iptables" ]; then
+  sudo iptables -L INPUT -n | grep -q "{{ssh_port}}" && sudo iptables -L INPUT -n | grep -q "80" && sudo iptables -L INPUT -n | grep -q "443"
+elif [ "{{firewall_backend}}" = "firewalld" ]; then
+  sudo firewall-cmd --list-ports | grep -q "{{ssh_port}}" && sudo firewall-cmd --list-services | grep -q "http"
+fi
+```
+
+## 8. AI 분석
+
+```ai
+방화벽 설정 결과를 분석하세요. SSH({{ssh_port}}), HTTP(80), HTTPS(443) 허용 규칙과 기본 DROP 정책을 확인하고 DDoS 방어, SYN flood 보호 등 추가 규칙이 필요한지 제안해 주세요.
+```

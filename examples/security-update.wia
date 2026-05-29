@@ -1,0 +1,85 @@
+---
+wia: "1"
+title: 보안 패치 적용 절차
+agent: soomy
+inputs:
+  os_type: { type: string, default: "auto" }
+---
+
+# 보안 패치 적용 절차
+
+## 1. OS 자동 감지
+
+```sh run
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  echo "OS: $NAME $VERSION_ID"
+  echo "ID: $ID"
+else
+  echo "Unknown OS"
+fi
+```
+
+## 2. 보안 업데이트 목록 확인
+
+```sh run
+if command -v dnf &>/dev/null; then
+  sudo dnf check-update --security 2>/dev/null || true
+elif command -v yum &>/dev/null; then
+  sudo yum check-update --security 2>/dev/null || true
+elif command -v apt-get &>/dev/null; then
+  sudo apt-get update && apt-get -s upgrade | grep -i security
+fi
+```
+
+## 3. 보안 패치 적용
+
+```sh run
+if command -v dnf &>/dev/null; then
+  sudo dnf update --security -y
+elif command -v yum &>/dev/null; then
+  sudo yum update --security -y
+elif command -v apt-get &>/dev/null; then
+  sudo apt-get update && sudo apt-get upgrade -y
+fi
+```
+
+## 4. 커널 업데이트 여부 확인
+
+```sh run
+RUNNING=$(uname -r)
+INSTALLED=$(rpm -q kernel --last 2>/dev/null | head -1 | awk '{print $1}' | sed 's/kernel-//' || dpkg -l linux-image-* 2>/dev/null | grep ^ii | tail -1 | awk '{print $2}')
+echo "Running kernel: $RUNNING"
+echo "Latest installed: $INSTALLED"
+if [ "$RUNNING" != "$INSTALLED" ]; then
+  echo "REBOOT REQUIRED"
+else
+  echo "Kernel is up to date"
+fi
+```
+
+## 5. 검증
+
+```verify expect=0
+if command -v dnf &>/dev/null; then
+  sudo dnf check-update --security 2>/dev/null; [ $? -le 1 ]
+elif command -v yum &>/dev/null; then
+  sudo yum check-update --security 2>/dev/null; [ $? -le 1 ]
+elif command -v apt-get &>/dev/null; then
+  apt-get -s upgrade 2>/dev/null | grep -c "security" | xargs test 0 -eq
+fi
+```
+
+## 6. 서비스 상태 확인
+
+```sh run
+sudo systemctl list-units --type=service --state=running --no-pager | head -20
+```
+
+## 7. AI 분석
+
+```ai
+보안 패치 적용 결과를 분석하세요.
+적용된 패치 목록, 커널 업데이트 필요 여부, 재부팅 필요성을 평가하세요.
+중요 서비스가 정상 동작 중인지 확인하고, 추가 조치가 필요하면 안내해 주세요.
+```

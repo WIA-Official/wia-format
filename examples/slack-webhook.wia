@@ -1,0 +1,93 @@
+---
+wia: "1"
+title: Slack 웹훅 알림 설정
+agent: soomy
+inputs:
+  webhook_url: { type: secret, default: "" }
+  channel: { type: string, default: "#alerts" }
+---
+
+# Slack 웹훅 알림 설정
+
+## 1. 웹훅 연결 테스트
+
+```sh run
+curl -s -o /dev/null -w "HTTP %{http_code}" -X POST {{webhook_url}} \
+  -H 'Content-type: application/json' \
+  -d '{"channel":"{{channel}}","text":"🔔 Webhook 연결 테스트 - '"$(hostname) $(date)"'"}'
+echo ""
+```
+
+## 2. 알림 스크립트 생성
+
+```sh run
+cat > /usr/local/bin/slack-notify.sh << 'SCRIPT'
+#!/bin/bash
+WEBHOOK_URL="$1"
+CHANNEL="${2:-{{channel}}}"
+LEVEL="${3:-info}"
+MESSAGE="${4:-No message}"
+
+case "$LEVEL" in
+  error)   COLOR="#FF0000"; EMOJI="🚨" ;;
+  warning) COLOR="#FFA500"; EMOJI="⚠️" ;;
+  success) COLOR="#36A64F"; EMOJI="✅" ;;
+  *)       COLOR="#439FE0"; EMOJI="ℹ️" ;;
+esac
+
+PAYLOAD=$(cat <<EOF
+{
+  "channel": "${CHANNEL}",
+  "attachments": [{
+    "color": "${COLOR}",
+    "title": "${EMOJI} $(hostname) Alert",
+    "text": "${MESSAGE}",
+    "footer": "Soomy Runbook",
+    "ts": $(date +%s)
+  }]
+}
+EOF
+)
+
+curl -s -X POST "$WEBHOOK_URL" -H 'Content-type: application/json' -d "$PAYLOAD"
+SCRIPT
+chmod +x /usr/local/bin/slack-notify.sh
+echo "스크립트 생성 완료: /usr/local/bin/slack-notify.sh"
+```
+
+## 3. 알림 레벨별 테스트
+
+```sh run
+/usr/local/bin/slack-notify.sh "{{webhook_url}}" "{{channel}}" "success" "Slack 알림 설정 완료"
+```
+
+## 4. 시스템 모니터링 연동 예시
+
+```sh run
+cat > /usr/local/bin/system-alert.sh << 'SCRIPT'
+#!/bin/bash
+WEBHOOK="{{webhook_url}}"
+CHANNEL="{{channel}}"
+CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print int($2)}')
+MEM=$(free | awk '/Mem/{printf("%.0f", $3/$2*100)}')
+DISK=$(df / | awk 'NR==2{print int($5)}')
+
+[ "$CPU" -gt 80 ] && /usr/local/bin/slack-notify.sh "$WEBHOOK" "$CHANNEL" "warning" "CPU 사용률: ${CPU}%"
+[ "$MEM" -gt 80 ] && /usr/local/bin/slack-notify.sh "$WEBHOOK" "$CHANNEL" "warning" "메모리 사용률: ${MEM}%"
+[ "$DISK" -gt 90 ] && /usr/local/bin/slack-notify.sh "$WEBHOOK" "$CHANNEL" "error" "디스크 사용률: ${DISK}%"
+SCRIPT
+chmod +x /usr/local/bin/system-alert.sh
+echo "시스템 알림 스크립트 생성 완료"
+```
+
+## 5. 검증
+
+```verify expect=0
+test -x /usr/local/bin/slack-notify.sh && test -x /usr/local/bin/system-alert.sh && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+Slack 웹훅 알림 설정을 분석해 주세요. 알림 스크립트 구조, 레벨 분류, 시스템 모니터링 연동을 검토하고, 알림 피로도 방지(쓰로틀링), 웹훅 보안(시크릿 관리), 에스컬레이션 정책을 제안해 주세요.
+```

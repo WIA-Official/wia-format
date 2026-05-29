@@ -1,0 +1,70 @@
+---
+wia: "1"
+title: Ubuntu 서버 초기 설정
+agent: soomy
+inputs:
+  hostname: { type: string, default: "ubuntu-server" }
+  timezone: { type: string, default: "Asia/Seoul" }
+  ssh_port: { type: string, default: "22" }
+  packages: { type: string, default: "curl wget git vim htop net-tools unzip jq" }
+---
+
+# Ubuntu 서버 초기 설정
+
+## 1. 호스트명 설정
+
+```sh run
+sudo hostnamectl set-hostname {{hostname}}
+echo "127.0.1.1 {{hostname}}" | sudo tee -a /etc/hosts
+hostnamectl
+```
+
+## 2. 타임존 설정
+
+```sh run
+sudo timedatectl set-timezone {{timezone}}
+timedatectl
+```
+
+## 3. 시스템 패키지 업데이트
+
+```sh run
+sudo apt update -y && sudo apt upgrade -y
+sudo apt autoremove -y
+```
+
+## 4. 필수 패키지 설치
+
+```sh run
+sudo apt install -y {{packages}}
+```
+
+## 5. UFW 방화벽 설정
+
+```sh run
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow {{ssh_port}}/tcp comment 'SSH'
+sudo ufw allow 80/tcp comment 'HTTP'
+sudo ufw allow 443/tcp comment 'HTTPS'
+sudo ufw --force enable
+```
+
+## 6. 자동 보안 업데이트 활성화
+
+```sh run
+sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+```
+
+## 7. 검증
+
+```verify expect=0
+hostnamectl | grep -q "{{hostname}}" && timedatectl | grep -q "{{timezone}}" && sudo ufw status | grep -q "active"
+```
+
+## 8. AI 분석
+
+```ai
+서버 초기 설정 결과를 분석하세요. 호스트명, 타임존, 패키지 설치, UFW 방화벽 상태를 확인하고 추가로 권장되는 보안 설정이 있는지 제안해 주세요.
+```

@@ -1,0 +1,65 @@
+---
+wia: "1"
+title: 디스크 100% 장애 대응
+agent: soomy
+inputs:
+  mount_point: { type: string, default: "/" }
+---
+
+# 디스크 100% 장애 대응
+
+## 1. 디스크 사용량 전체 확인
+
+```sh run
+df -h
+```
+
+## 2. 대상 마운트 포인트 상세 확인
+
+```sh run
+df -h {{mount_point}} && df -i {{mount_point}}
+```
+
+## 3. 대용량 디렉토리 탐색
+
+```sh run
+du -h --max-depth=2 {{mount_point}} 2>/dev/null | sort -rh | head -20
+```
+
+## 4. 100MB 이상 대용량 파일 검색
+
+```sh run
+find {{mount_point}} -xdev -type f -size +100M -exec ls -lh {} \; 2>/dev/null | sort -k5 -rh | head -20
+```
+
+## 5. 오래된 로그 파일 정리
+
+```sh run
+find /var/log -name "*.gz" -mtime +30 -exec ls -lh {} \; 2>/dev/null
+find /tmp -type f -atime +7 -exec ls -lh {} \; 2>/dev/null | head -20
+echo "---"
+echo "삭제하려면: find /var/log -name '*.gz' -mtime +30 -delete"
+echo "삭제하려면: find /tmp -type f -atime +7 -delete"
+```
+
+## 6. 삭제됐지만 열린 파일 확인
+
+```sh run
+lsof +L1 2>/dev/null | head -20
+```
+
+## 7. 검증
+
+```verify expect=0
+USAGE=$(df {{mount_point}} | awk 'NR==2{gsub(/%/,""); print $5}')
+[ "$USAGE" -lt 90 ] && exit 0 || exit 1
+```
+
+## 8. AI 분석
+
+```ai
+디스크 사용량 데이터, 대용량 파일 목록, 로그 파일 현황을 분석하여:
+1. 디스크 풀의 근본 원인 (로그 폭주, 임시 파일 누적, 데이터 증가 등)을 판별하라
+2. 즉시 안전하게 삭제 가능한 파일 목록을 제시하라
+3. logrotate 설정 또는 자동 정리 크론잡 등 재발 방지 방안을 제안하라
+```

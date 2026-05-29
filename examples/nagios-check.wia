@@ -1,0 +1,57 @@
+---
+wia: "1"
+title: Nagios 상태 점검
+agent: soomy
+inputs:
+  nagios_url: { type: string, default: "http://localhost/nagios" }
+---
+
+# Nagios 상태 점검
+
+## 1. Nagios 서비스 상태 확인
+
+```sh run
+sudo systemctl status nagios --no-pager
+```
+
+## 2. Nagios 설정 파일 문법 검증
+
+```sh run
+sudo /usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg 2>&1 | tail -5
+```
+
+## 3. 웹 인터페이스 응답 확인
+
+```sh run
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "{{nagios_url}}")
+echo "Nagios Web UI HTTP Status: ${HTTP_CODE}"
+```
+
+## 4. 호스트 및 서비스 경고 조회
+
+```sh run
+curl -s "{{nagios_url}}/cgi-bin/statusjson.cgi?query=servicelist&servicestatus=warning+critical" \
+  --max-time 10 2>/dev/null || \
+  grep -c "CRITICAL\|WARNING" /usr/local/nagios/var/status.dat 2>/dev/null || \
+  echo "상태 데이터를 가져올 수 없습니다"
+```
+
+## 5. 검증 - Nagios 프로세스 실행 확인
+
+```verify expect=0
+pgrep -x nagios > /dev/null
+```
+
+## 6. 로그에서 최근 에러 확인
+
+```sh run
+sudo tail -30 /usr/local/nagios/var/nagios.log | grep -i "error\|warning\|alert" || echo "최근 에러 없음"
+```
+
+## 7. AI 분석
+
+```ai
+Nagios({{nagios_url}}) 상태 점검 결과를 분석해줘.
+서비스 실행 상태, 설정 파일 검증 결과, 웹 UI 응답 코드, 경고/크리티컬 서비스 목록을 종합하여
+현재 모니터링 시스템의 건강 상태를 평가하고, 조치가 필요한 항목을 우선순위별로 정리해줘.
+```

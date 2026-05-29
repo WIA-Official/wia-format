@@ -1,0 +1,58 @@
+---
+wia: "1"
+title: RDS 유지보수 파라미터 그룹 및 슬로우 쿼리
+agent: soomy
+inputs:
+  db_instance_id: { type: string, default: "my-database" }
+---
+
+# RDS 유지보수 파라미터 그룹 및 슬로우 쿼리
+
+## 1. RDS 인스턴스 상태 확인
+
+```sh run
+aws rds describe-db-instances --db-instance-identifier {{db_instance_id}} \
+  --query 'DBInstances[0].[DBInstanceIdentifier,DBInstanceStatus,Engine,EngineVersion,DBInstanceClass,AllocatedStorage]' --output table
+```
+
+## 2. 파라미터 그룹 확인
+
+```sh run
+PG=$(aws rds describe-db-instances --db-instance-identifier {{db_instance_id}} \
+  --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text)
+echo "파라미터 그룹: $PG"
+aws rds describe-db-parameters --db-parameter-group-name "$PG" \
+  --query 'Parameters[?ParameterName==`slow_query_log` || ParameterName==`long_query_time` || ParameterName==`log_output`].[ParameterName,ParameterValue,ApplyType]' --output table
+```
+
+## 3. 슬로우 쿼리 로그 활성화
+
+```sh run
+PG=$(aws rds describe-db-instances --db-instance-identifier {{db_instance_id}} \
+  --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text)
+aws rds modify-db-parameter-group --db-parameter-group-name "$PG" --parameters \
+  "ParameterName=slow_query_log,ParameterValue=1,ApplyMethod=immediate" \
+  "ParameterName=long_query_time,ParameterValue=1,ApplyMethod=immediate" \
+  "ParameterName=log_output,ParameterValue=FILE,ApplyMethod=immediate"
+echo "슬로우 쿼리 로그 활성화 완료"
+```
+
+## 4. 최근 로그 확인
+
+```sh run
+aws rds describe-db-log-files --db-instance-identifier {{db_instance_id}} \
+  --query 'DescribeDBLogFiles[-5:].[LogFileName,Size,LastWritten]' --output table
+```
+
+## 5. 검증
+
+```verify expect=0
+PG=$(aws rds describe-db-instances --db-instance-identifier {{db_instance_id}} --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text)
+aws rds describe-db-parameters --db-parameter-group-name "$PG" --query 'Parameters[?ParameterName==`slow_query_log`].ParameterValue' --output text | grep -q "1" && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+RDS 인스턴스 {{db_instance_id}}의 유지보수 상태를 분석해 주세요. 슬로우 쿼리 설정, 파라미터 그룹 변경 사항을 확인하고, 성능 개선(Performance Insights, 인덱스 최적화), 백업 정책, 보안(암호화, 네트워크 격리) 권고 사항을 제안해 주세요.
+```

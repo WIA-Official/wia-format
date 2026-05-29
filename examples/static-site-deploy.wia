@@ -1,0 +1,87 @@
+---
+wia: "1"
+title: 정적 사이트 배포 HTML/CSS/JS + Nginx
+agent: soomy
+inputs:
+  domain: { type: string, default: "example.com" }
+  source_dir: { type: string, default: "/home/ec2-user/site-build" }
+---
+
+# 정적 사이트 배포 HTML/CSS/JS + Nginx
+
+## 1. 소스 디렉토리 확인
+
+```sh run
+ls -la {{source_dir}}/
+test -f {{source_dir}}/index.html && echo "index.html found" || echo "WARNING: no index.html"
+```
+
+## 2. 배포 디렉토리 생성 및 파일 복사
+
+```sh run
+sudo mkdir -p /var/www/{{domain}}/html
+sudo rsync -av --delete {{source_dir}}/ /var/www/{{domain}}/html/
+sudo chown -R nginx:nginx /var/www/{{domain}} 2>/dev/null || sudo chown -R www-data:www-data /var/www/{{domain}}
+```
+
+## 3. Nginx 서버 블록 설정
+
+```sh run
+sudo tee /etc/nginx/conf.d/{{domain}}.conf > /dev/null <<'CONF'
+server {
+    listen 80;
+    server_name {{domain}} www.{{domain}};
+    root /var/www/{{domain}}/html;
+    index index.html;
+
+    # gzip compression
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;
+    gzip_min_length 256;
+
+    # static asset caching
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # SPA fallback (optional)
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # security: deny dotfiles
+    location ~ /\. {
+        deny all;
+    }
+}
+CONF
+```
+
+## 4. Nginx 설정 검증 및 적용
+
+```sh run
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+## 5. 파일 무결성 확인
+
+```sh run
+echo "Deployed files:"
+find /var/www/{{domain}}/html -type f | wc -l
+echo "Total size:"
+du -sh /var/www/{{domain}}/html
+```
+
+## 6. 검증
+
+```verify expect=0
+curl -sSo /dev/null -w "%{http_code}" -H "Host: {{domain}}" http://localhost | grep -q "200"
+```
+
+## 7. AI 분석
+
+```ai
+정적 사이트 배포 상태를 점검하세요. gzip 압축 적용, 캐싱 헤더, 보안 헤더(X-Content-Type-Options, X-Frame-Options, CSP) 누락 여부, 404 페이지 설정을 분석하고 성능 및 보안 개선 권고사항을 제시하세요.
+```

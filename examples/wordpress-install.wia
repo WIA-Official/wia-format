@@ -1,0 +1,75 @@
+---
+wia: "1"
+title: WordPress 최신 버전 설치
+agent: soomy
+inputs:
+  domain: { type: string, default: "example.com" }
+  db_name: { type: string, default: "wordpress" }
+  db_user: { type: string, default: "wpuser" }
+  db_pass: { type: secret }
+---
+
+# WordPress 최신 버전 설치
+
+## 1. Apache + PHP 설치
+
+```sh run
+sudo dnf install -y httpd php php-mysqlnd php-json php-gd php-mbstring php-xml php-curl
+```
+
+## 2. Apache 시작
+
+```sh run
+sudo systemctl enable --now httpd
+```
+
+```verify expect=0
+sudo systemctl is-active httpd
+```
+
+## 3. MariaDB 설치 + 시작
+
+```sh run
+sudo dnf install -y mariadb105-server
+sudo systemctl enable --now mariadb
+```
+
+```verify expect=0
+sudo systemctl is-active mariadb
+```
+
+## 4. DB 생성
+
+```sh run
+sudo mysql -e "CREATE DATABASE IF NOT EXISTS {{db_name}}; CREATE USER IF NOT EXISTS '{{db_user}}'@'localhost' IDENTIFIED BY '{{db_pass}}'; GRANT ALL ON {{db_name}}.* TO '{{db_user}}'@'localhost'; FLUSH PRIVILEGES;"
+```
+
+## 5. WordPress 다운로드 + 설치
+
+```sh run
+cd /tmp && curl -O https://wordpress.org/latest.tar.gz
+sudo tar -xzf latest.tar.gz -C /var/www/html/ --strip-components=1
+sudo chown -R apache:apache /var/www/html/
+```
+
+## 6. wp-config.php 생성
+
+```sh run
+cd /var/www/html
+sudo cp wp-config-sample.php wp-config.php
+sudo sed -i "s/database_name_here/{{db_name}}/" wp-config.php
+sudo sed -i "s/username_here/{{db_user}}/" wp-config.php
+sudo sed -i "s/password_here/{{db_pass}}/" wp-config.php
+```
+
+## 7. 설치 확인
+
+```verify expect=0
+curl -s -o /dev/null -w "%{http_code}" http://localhost/ | grep -q "200\|302"
+```
+
+## 8. AI 분석
+
+```ai
+WordPress 설치가 완료되었습니다. 보안 강화를 위해 추가로 해야 할 설정을 알려줘.
+```

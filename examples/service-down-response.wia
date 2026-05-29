@@ -1,0 +1,70 @@
+---
+wia: "1"
+title: 서비스 다운 대응
+agent: soomy
+inputs:
+  service_name: { type: string }
+---
+
+# 서비스 다운 대응
+
+## 1. 서비스 상태 확인
+
+```sh run
+systemctl status {{service_name}} --no-pager -l
+```
+
+## 2. 서비스 포트 및 프로세스 확인
+
+```sh run
+echo "=== 관련 프로세스 ==="
+ps aux | grep -i {{service_name}} | grep -v grep
+echo "=== 리스닝 포트 ==="
+ss -tlnp | grep -i {{service_name}} || echo "리스닝 포트 없음"
+```
+
+## 3. 최근 로그 확인
+
+```sh run
+journalctl -u {{service_name}} --no-pager -n 50 --since "30 min ago"
+```
+
+## 4. 서비스 재시작
+
+```sh run
+sudo systemctl restart {{service_name}}
+echo "재시작 완료, 5초 대기..."
+sleep 5
+systemctl is-active {{service_name}}
+```
+
+## 5. 재시작 후 상태 확인
+
+```sh run
+systemctl status {{service_name}} --no-pager -l
+echo "=== 포트 확인 ==="
+ss -tlnp | grep -i {{service_name}} || echo "리스닝 포트 없음"
+```
+
+## 6. 검증
+
+```verify expect=0
+systemctl is-active --quiet {{service_name}} && exit 0 || exit 1
+```
+
+## 7. 실패 시 의존성 확인
+
+```sh run
+systemctl list-dependencies {{service_name}} --plain | head -20
+echo "=== 실패 이력 ==="
+systemctl show {{service_name}} -p NRestarts,ExecMainStatus,ActiveEnterTimestamp,InactiveEnterTimestamp
+```
+
+## 8. AI 분석
+
+```ai
+서비스 상태, 로그 메시지, 재시작 결과, 의존성 정보를 종합 분석하여:
+1. 서비스 다운의 근본 원인 (설정 오류, 포트 충돌, 의존 서비스 장애, OOM 등)을 판별하라
+2. 재시작이 성공했다면 안정적인지, 반복 실패 패턴이 있는지 평가하라
+3. 자동 복구 설정 (Restart=always, StartLimitBurst 등) 및 모니터링 방안을 제안하라
+```

@@ -1,0 +1,107 @@
+---
+wia: "1"
+title: Django 앱 배포 Gunicorn + Nginx 연동
+agent: soomy
+inputs:
+  project_name: { type: string, default: "myproject" }
+  domain: { type: string, default: "app.example.com" }
+---
+
+# Django 앱 배포 Gunicorn + Nginx 연동
+
+## 1. Python 및 가상환경 준비
+
+```sh run
+sudo dnf install -y python3 python3-pip python3-devel gcc || sudo apt-get install -y python3 python3-pip python3-venv python3-dev build-essential
+cd /opt/{{project_name}}
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install gunicorn
+```
+
+## 2. Django 정적 파일 수집 및 마이그레이션
+
+```sh run
+cd /opt/{{project_name}}
+source venv/bin/activate
+python manage.py collectstatic --noinput
+python manage.py migrate --noinput
+```
+
+## 3. Gunicorn systemd 서비스 등록
+
+```sh run
+sudo tee /etc/systemd/system/{{project_name}}.service > /dev/null <<'SVC'
+[Unit]
+Description={{project_name}} Django via Gunicorn
+After=network.target
+
+[Service]
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/opt/{{project_name}}
+ExecStart=/opt/{{project_name}}/venv/bin/gunicorn \
+    --workers 3 \
+    --bind unix:/run/{{project_name}}.sock \
+    --access-logfile /var/log/{{project_name}}/access.log \
+    --error-logfile /var/log/{{project_name}}/error.log \
+    {{project_name}}.wsgi:application
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SVC
+sudo mkdir -p /var/log/{{project_name}}
+sudo systemctl daemon-reload
+sudo systemctl enable --now {{project_name}}
+```
+
+## 4. Nginx 리버스 프록시 설정
+
+```sh run
+sudo tee /etc/nginx/conf.d/{{project_name}}.conf > /dev/null <<'CONF'
+server {
+    listen 80;
+    server_name {{domain}};
+
+    client_max_body_size 10M;
+
+    location /static/ {
+        alias /opt/{{project_name}}/staticfiles/;
+        expires 30d;
+    }
+
+    location /media/ {
+        alias /opt/{{project_name}}/media/;
+    }
+
+    location / {
+        proxy_pass http://unix:/run/{{project_name}}.sock;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+CONF
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+## 5. 검증
+
+```verify expect=0
+sudo systemctl is-active {{project_name}} | grep -q "active"
+```
+
+```verify expect=0
+curl -sSo /dev/null -w "%{http_code}" -H "Host: {{domain}}" http://localhost | grep -q "200\|301\|302"
+```
+
+## 6. AI 분석
+
+```ai
+Gunicorn worker 수와 서버 CPU 코어 비율, Django DEBUG/ALLOWED_HOSTS 설정, 소켓 권한, 정적 파일 캐싱 효율을 분석하고 프로덕션 보안 및 성능 권고사항을 제시하세요.
+```

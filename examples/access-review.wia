@@ -1,0 +1,122 @@
+---
+wia: "1"
+title: 접근 권한 감사 및 정리
+agent: soomy
+inputs:
+  days_inactive: { type: string, default: "90" }
+---
+
+# 접근 권한 감사 및 정리
+
+## 1. 시스템 사용자 감사
+
+```sh run
+echo "=== 로그인 가능한 사용자 ==="
+grep -v '/nologin\|/false' /etc/passwd | awk -F: '{print $1, "UID:"$3, "HOME:"$6, "SHELL:"$7}'
+echo ""
+echo "=== UID 0 (root 권한) 사용자 ==="
+awk -F: '$3==0 {print $1}' /etc/passwd
+echo ""
+echo "=== 비활성 사용자 ({{days_inactive}}일 이상 미접속) ==="
+lastlog -b {{days_inactive}} 2>/dev/null | grep -v 'Never logged in' | grep -v 'Username' | head -20
+echo ""
+echo "=== 한 번도 접속하지 않은 사용자 ==="
+lastlog 2>/dev/null | grep 'Never logged in' | awk '{print $1}' | head -20
+```
+
+## 2. sudo 권한 감사
+
+```sh run
+echo "=== sudoers 파일 ==="
+sudo cat /etc/sudoers | grep -v '^#' | grep -v '^$' | grep -v '^Defaults' 2>/dev/null
+echo ""
+echo "=== sudoers.d 추가 설정 ==="
+for f in /etc/sudoers.d/*; do
+  if [ -f "$f" ]; then
+    echo "--- $f ---"
+    sudo cat "$f" 2>/dev/null | grep -v '^#' | grep -v '^$'
+  fi
+done 2>/dev/null
+echo ""
+echo "=== wheel/sudo 그룹 멤버 ==="
+getent group wheel 2>/dev/null || getent group sudo 2>/dev/null || echo "wheel/sudo 그룹 없음"
+echo ""
+echo "=== 최근 sudo 사용 이력 ==="
+sudo grep -i 'sudo' /var/log/auth.log 2>/dev/null | tail -10 || sudo grep -i 'sudo' /var/log/secure 2>/dev/null | tail -10 || echo "sudo 로그 없음"
+```
+
+## 3. SSH 키 감사
+
+```sh run
+echo "=== authorized_keys 파일 점검 ==="
+for home in /home/* /root; do
+  AUTH_FILE="$home/.ssh/authorized_keys"
+  if [ -f "$AUTH_FILE" ]; then
+    KEY_COUNT=$(wc -l < "$AUTH_FILE")
+    USER=$(basename "$home")
+    echo "[$USER] $KEY_COUNT개 키 등록"
+    while IFS= read -r line; do
+      if [ -n "$line" ] && [[ ! "$line" == \#* ]]; then
+        COMMENT=$(echo "$line" | awk '{print $NF}')
+        TYPE=$(echo "$line" | awk '{print $1}')
+        echo "  유형: $TYPE | 코멘트: $COMMENT"
+      fi
+    done < "$AUTH_FILE"
+    echo ""
+  fi
+done 2>/dev/null
+
+echo "=== SSH 설정 보안 ==="
+echo "PasswordAuthentication: $(sshd -T 2>/dev/null | grep passwordauthentication | awk '{print $2}' || grep -i '^PasswordAuthentication' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')"
+echo "PermitRootLogin: $(sshd -T 2>/dev/null | grep permitrootlogin | awk '{print $2}' || grep -i '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')"
+echo "PubkeyAuthentication: $(sshd -T 2>/dev/null | grep pubkeyauthentication | awk '{print $2}' || grep -i '^PubkeyAuthentication' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')"
+```
+
+## 4. 최근 접속 이력 분석
+
+```sh run
+echo "=== 최근 30일 접속 이력 ==="
+last -30 2>/dev/null | head -30
+echo ""
+echo "=== 실패한 로그인 시도 ==="
+sudo grep -i 'failed' /var/log/auth.log 2>/dev/null | tail -10 || sudo grep -i 'failed' /var/log/secure 2>/dev/null | tail -10 || echo "실패 로그 없음"
+echo ""
+echo "=== 현재 접속 세션 ==="
+who -a 2>/dev/null
+echo ""
+echo "=== 열린 SSH 세션 수 ==="
+ss -tnp | grep ':22' | wc -l | xargs -I{} echo "현재 SSH 세션: {}개"
+```
+
+## 5. 파일 권한 감사
+
+```sh run
+echo "=== SUID/SGID 파일 (비표준) ==="
+find / -perm /6000 -type f 2>/dev/null | grep -v '/usr/\|/bin/\|/sbin/' | head -10
+echo ""
+echo "=== 전체 쓰기 가능 파일 (tmp 제외) ==="
+find /etc /opt /home -perm -o+w -type f 2>/dev/null | head -10
+echo ""
+echo "=== 소유자 없는 파일 ==="
+find /home /opt /var/www -nouser -o -nogroup 2>/dev/null | head -10
+echo ""
+echo "=== 중요 파일 권한 ==="
+ls -la /etc/shadow /etc/passwd /etc/sudoers /etc/ssh/sshd_config 2>/dev/null
+```
+
+## 6. 검증
+
+```verify expect=0
+test "$(awk -F: '$3==0 {print $1}' /etc/passwd | wc -l)" -eq 1
+```
+
+## 7. AI 분석
+
+```ai
+접근 권한 감사 결과를 분석해 주세요:
+1. {{days_inactive}}일 이상 비활성 사용자 정리 대상 목록
+2. 과도한 sudo 권한이 부여된 사용자
+3. SSH 키 보안 상태 및 정리 대상
+4. 파일 권한 이상 항목 및 조치 방안
+5. 접근 제어 강화를 위한 종합 권고 사항 (최소 권한 원칙 기반)
+```

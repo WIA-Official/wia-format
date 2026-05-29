@@ -1,0 +1,64 @@
+---
+wia: "1"
+title: Fail2Ban 설치 및 SSH 보호 설정
+agent: soomy
+inputs:
+  max_retry: { type: string, default: "5" }
+  ban_time: { type: string, default: "3600" }
+---
+
+# Fail2Ban 설치 및 SSH 보호 설정
+
+## 1. Fail2Ban 패키지 설치
+
+```sh run
+sudo yum install -y epel-release && sudo yum install -y fail2ban
+```
+
+## 2. SSH Jail 설정 파일 생성
+
+```sh run
+sudo tee /etc/fail2ban/jail.d/sshd.local <<'CONF'
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/secure
+maxretry = {{max_retry}}
+bantime = {{ban_time}}
+findtime = 600
+banaction = iptables-multiport
+CONF
+```
+
+## 3. Fail2Ban 서비스 시작 및 자동 실행 등록
+
+```sh run
+sudo systemctl enable --now fail2ban
+```
+
+## 4. Fail2Ban 상태 확인
+
+```sh run
+sudo fail2ban-client status sshd
+```
+
+## 5. 검증
+
+```verify expect=0
+sudo fail2ban-client ping | grep -q "pong"
+```
+
+## 6. 차단 로그 샘플 확인
+
+```sh run
+sudo fail2ban-client status sshd | grep -E "Currently banned|Total banned"
+```
+
+## 7. AI 분석
+
+```ai
+Fail2Ban이 정상적으로 설치되었는지, SSH jail 설정이 올바르게 적용되었는지 확인하세요.
+maxretry={{max_retry}}, bantime={{ban_time}} 설정이 현재 서버 환경에 적절한지 평가하고,
+추가로 권장하는 보안 설정이 있다면 제안해 주세요.
+```

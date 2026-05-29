@@ -1,0 +1,84 @@
+---
+wia: "1"
+title: DB 마이그레이션 절차 (백업-스키마-데이터-검증)
+agent: soomy
+inputs:
+  db_name: { type: string, default: "appdb" }
+  migration_dir: { type: string, default: "/migrations" }
+---
+
+# DB 마이그레이션 절차 (백업-스키마-데이터-검증)
+
+## 1. 마이그레이션 사전 점검
+
+```sh run
+echo "=== 마이그레이션 파일 목록 ==="
+ls -la {{migration_dir}}/*.sql 2>/dev/null || echo "마이그레이션 파일 없음"
+echo ""
+echo "=== 현재 DB 크기 ==="
+sudo -u postgres psql -d {{db_name}} -c "SELECT pg_size_pretty(pg_database_size('{{db_name}}'));"
+echo ""
+echo "=== 활성 연결 수 ==="
+sudo -u postgres psql -d {{db_name}} -c "SELECT count(*) AS active_connections FROM pg_stat_activity WHERE datname='{{db_name}}';"
+```
+
+## 2. 마이그레이션 전 백업 생성
+
+```sh run
+BACKUP_FILE="/tmp/{{db_name}}_pre_migration_$(date +%Y%m%d_%H%M%S).dump"
+sudo -u postgres pg_dump --format=custom --compress=9 --file="${BACKUP_FILE}" {{db_name}}
+chmod 600 "${BACKUP_FILE}"
+echo "Pre-migration backup: ${BACKUP_FILE} ($(du -h "${BACKUP_FILE}" | cut -f1))"
+```
+
+## 3. 백업 무결성 확인
+
+```verify expect=0
+LATEST=$(ls -t /tmp/{{db_name}}_pre_migration_*.dump | head -1) && sudo -u postgres pg_restore --list "$LATEST" > /dev/null 2>&1
+```
+
+## 4. 스키마 마이그레이션 실행
+
+```sh run
+for sql_file in $(ls {{migration_dir}}/*.sql 2>/dev/null | sort); do
+  echo "=== Applying: $(basename ${sql_file}) ==="
+  sudo -u postgres psql -d {{db_name}} \
+    --set ON_ERROR_STOP=on \
+    -f "${sql_file}" 2>&1
+  if [ $? -ne 0 ]; then
+    echo "FAILED: ${sql_file}" >&2
+    exit 1
+  fi
+  echo "OK: $(basename ${sql_file})"
+done
+echo "=== All migrations applied ==="
+```
+
+## 5. 데이터 마이그레이션 검증
+
+```sh run
+echo "=== 마이그레이션 후 테이블 목록 ==="
+sudo -u postgres psql -d {{db_name}} -c "\dt+"
+echo ""
+echo "=== 마이그레이션 후 DB 크기 ==="
+sudo -u postgres psql -d {{db_name}} -c "SELECT pg_size_pretty(pg_database_size('{{db_name}}'));"
+```
+
+## 6. 외래 키 및 인덱스 검증
+
+```verify expect=0
+sudo -u postgres psql -d {{db_name}} -c "SELECT count(*) FROM information_schema.table_constraints WHERE constraint_type='FOREIGN KEY' AND table_catalog='{{db_name}}';" | grep -qE '[0-9]+'
+```
+
+## 7. VACUUM ANALYZE 실행
+
+```sh run
+sudo -u postgres psql -d {{db_name}} -c "VACUUM ANALYZE;"
+echo "VACUUM ANALYZE complete."
+```
+
+## 8. AI 분석
+
+```ai
+DB 마이그레이션 결과를 종합 분석하세요. 적용된 마이그레이션 파일 목록, 스키마 변경 사항, 데이터 무결성(외래 키, 인덱스), 마이그레이션 전후 DB 크기 변화를 확인하세요. 롤백이 필요한 경우 백업 파일을 이용한 복원 절차를 안내하고, 프로덕션 적용 시 다운타임 최소화 전략을 제안하세요.
+```

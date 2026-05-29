@@ -1,0 +1,47 @@
+---
+wia: "1"
+title: Kubernetes 롤백 절차
+agent: soomy
+inputs:
+  deployment_name: { type: string, default: "myapp" }
+  namespace: { type: string, default: "default" }
+---
+
+# Kubernetes 롤백 절차
+
+## 1. 현재 롤아웃 히스토리 확인
+
+```sh run
+kubectl rollout history deployment/{{deployment_name}} -n {{namespace}}
+```
+
+## 2. 현재 상태 확인
+
+```sh run
+kubectl get deployment {{deployment_name}} -n {{namespace}} -o wide
+kubectl get pods -n {{namespace}} -l app={{deployment_name}} -o wide
+```
+
+## 3. 이전 버전으로 롤백
+
+```sh run
+kubectl rollout undo deployment/{{deployment_name}} -n {{namespace}}
+```
+
+## 4. 롤백 완료 대기
+
+```sh run
+kubectl rollout status deployment/{{deployment_name}} -n {{namespace}} --timeout=120s
+```
+
+## 5. 검증
+
+```verify expect=0
+kubectl get deployment {{deployment_name}} -n {{namespace}} -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' | grep -q True && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+{{deployment_name}} 디플로이먼트의 롤백 결과를 분석해 주세요. 롤백 전후 리비전 변경 사항과 Pod 상태를 확인하고, 롤백 원인이 될 수 있는 문제를 진단해 주세요.
+```

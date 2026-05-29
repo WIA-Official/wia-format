@@ -1,0 +1,54 @@
+---
+wia: "1"
+title: 노드 유지보수 Drain+Uncordon
+agent: soomy
+inputs:
+  node_name: { type: string, default: "worker-1" }
+---
+
+# 노드 유지보수 Drain+Uncordon
+
+## 1. 노드 현재 상태 확인
+
+```sh run
+kubectl get node {{node_name}} -o wide
+kubectl get pods --field-selector spec.nodeName={{node_name}} --all-namespaces -o wide
+```
+
+## 2. 노드 cordon (스케줄링 차단)
+
+```sh run
+kubectl cordon {{node_name}}
+```
+
+## 3. 노드 drain (워크로드 제거)
+
+```sh run
+kubectl drain {{node_name}} --ignore-daemonsets --delete-emptydir-data --force --timeout=300s
+```
+
+## 4. 유지보수 작업 확인
+
+```sh run
+echo "=== {{node_name}} 노드에서 실행 중인 Pod 확인 ==="
+kubectl get pods --field-selector spec.nodeName={{node_name}} --all-namespaces --no-headers | wc -l
+```
+
+## 5. 검증 - 워크로드 제거 완료
+
+```verify expect=0
+kubectl get pods --field-selector spec.nodeName={{node_name}} --all-namespaces --no-headers --ignore-not-found | grep -v DaemonSet | wc -l
+```
+
+## 6. 노드 uncordon (스케줄링 재개)
+
+```sh run
+kubectl uncordon {{node_name}}
+kubectl get node {{node_name}}
+```
+
+## 7. AI 분석
+
+```ai
+{{node_name}} 노드의 drain 및 uncordon 과정을 분석해 주세요. 워크로드 이동이 정상적으로 완료되었는지, PodDisruptionBudget 위반은 없었는지 확인해 주세요.
+```

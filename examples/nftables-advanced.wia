@@ -1,0 +1,84 @@
+---
+wia: "1"
+title: nftables 고급 설정 - 레이트 리밋, 포트 포워딩, NAT
+agent: soomy
+inputs:
+  forward_port: { type: string, default: "8080" }
+  forward_target: { type: string, default: "192.168.1.100:80" }
+  rate_limit: { type: string, default: "25/second" }
+---
+
+# nftables 고급 설정 - 레이트 리밋, 포트 포워딩, NAT
+
+## 1. nftables 설치 및 현재 상태 확인
+
+```sh run
+sudo dnf install -y nftables
+sudo systemctl enable --now nftables
+sudo nft list ruleset
+```
+
+## 2. 기본 테이블 및 체인 생성
+
+```sh run
+sudo nft add table inet filter
+sudo nft add chain inet filter input { type filter hook input priority 0 \; policy drop \; }
+sudo nft add chain inet filter forward { type filter hook forward priority 0 \; policy drop \; }
+sudo nft add chain inet filter output { type filter hook output priority 0 \; policy accept \; }
+sudo nft add rule inet filter input ct state established,related accept
+sudo nft add rule inet filter input iif lo accept
+sudo nft list table inet filter
+```
+
+## 3. 레이트 리밋 규칙 적용
+
+```sh run
+sudo nft add rule inet filter input tcp dport 22 limit rate {{rate_limit}} accept
+sudo nft add rule inet filter input tcp dport 80 limit rate {{rate_limit}} accept
+sudo nft add rule inet filter input tcp dport 443 limit rate {{rate_limit}} accept
+sudo nft add rule inet filter input tcp dport 22 drop
+sudo nft add rule inet filter input tcp dport 80 drop
+sudo nft add rule inet filter input tcp dport 443 drop
+echo "레이트 리밋 {{rate_limit}} 적용 완료"
+```
+
+## 4. NAT 테이블 및 포트 포워딩 설정
+
+```sh run
+sudo nft add table ip nat
+sudo nft add chain ip nat prerouting { type nat hook prerouting priority -100 \; }
+sudo nft add chain ip nat postrouting { type nat hook postrouting priority 100 \; }
+TARGET_IP=$(echo "{{forward_target}}" | cut -d: -f1)
+TARGET_PORT=$(echo "{{forward_target}}" | cut -d: -f2)
+sudo nft add rule ip nat prerouting tcp dport {{forward_port}} dnat to {{forward_target}}
+sudo nft add rule ip nat postrouting ip daddr $TARGET_IP tcp dport $TARGET_PORT masquerade
+sudo sysctl -w net.ipv4.ip_forward=1
+echo "포트 포워딩: {{forward_port}} -> {{forward_target}}"
+```
+
+## 5. 규칙셋 저장 및 영구 적용
+
+```sh run
+sudo nft list ruleset | sudo tee /etc/nftables.conf
+sudo systemctl restart nftables
+sudo nft list ruleset
+```
+
+## 6. 검증
+
+```verify expect=0
+sudo nft list ruleset | grep -c "limit rate"
+test $? -eq 0 && echo "레이트 리밋 규칙 활성화 확인" || echo "레이트 리밋 규칙 없음"
+sudo nft list ruleset | grep "dnat to"
+echo "포트 포워딩 규칙 확인 완료"
+```
+
+## 7. AI 분석
+
+```ai
+현재 nftables 규칙셋을 분석해 주세요:
+- 레이트 리밋 {{rate_limit}} 설정이 서비스 특성에 적합한지
+- 포트 포워딩 {{forward_port}} -> {{forward_target}} 보안 위험 요소
+- NAT 규칙의 누락된 보안 항목
+- DDoS 방어를 위한 추가 권장 규칙
+```

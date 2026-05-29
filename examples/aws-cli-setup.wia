@@ -1,0 +1,57 @@
+---
+wia: "1"
+title: AWS CLI 설치 및 프로파일 설정
+agent: soomy
+inputs:
+  region: { type: string, default: "ap-northeast-2" }
+  profile: { type: string, default: "default" }
+---
+
+# AWS CLI 설치 및 프로파일 설정
+
+## 1. AWS CLI 설치 확인
+
+```sh run
+aws --version 2>/dev/null || {
+  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+  cd /tmp && unzip -o awscliv2.zip && sudo ./aws/install --update
+  aws --version
+}
+```
+
+## 2. 프로파일 설정
+
+```sh run
+aws configure set region {{region}} --profile {{profile}}
+aws configure set output json --profile {{profile}}
+echo "=== 현재 프로파일 설정 ==="
+aws configure list --profile {{profile}}
+```
+
+## 3. 자격 증명 확인
+
+```sh run
+aws sts get-caller-identity --profile {{profile}}
+```
+
+## 4. 기본 서비스 접근 테스트
+
+```sh run
+echo "=== S3 버킷 목록 ==="
+aws s3 ls --profile {{profile}} 2>&1 | head -10
+echo ""
+echo "=== EC2 인스턴스 ==="
+aws ec2 describe-instances --profile {{profile}} --query 'Reservations[*].Instances[*].[InstanceId,State.Name,InstanceType]' --output table 2>&1 | head -20
+```
+
+## 5. 검증
+
+```verify expect=0
+aws sts get-caller-identity --profile {{profile}} --query 'Account' --output text > /dev/null 2>&1 && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+AWS CLI 설정 결과를 분석해 주세요. 자격 증명 상태, 리전 설정, IAM 권한 범위를 확인하고, MFA 설정, 최소 권한 원칙 적용, 프로파일 보안 관리 방안을 제안해 주세요.
+```

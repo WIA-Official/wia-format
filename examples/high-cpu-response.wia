@@ -1,0 +1,59 @@
+---
+wia: "1"
+title: CPU 100% 장애 대응
+agent: soomy
+inputs:
+  duration: { type: string, default: "10" }
+---
+
+# CPU 100% 장애 대응
+
+## 1. 시스템 부하 확인
+
+```sh run
+uptime && cat /proc/loadavg
+```
+
+## 2. CPU 점유 상위 프로세스 확인
+
+```sh run
+ps aux --sort=-%cpu | head -20
+```
+
+## 3. 실시간 CPU 모니터링
+
+```sh run
+top -b -n 1 -o %CPU | head -30
+```
+
+## 4. 상위 프로세스 스레드 분석
+
+```sh run
+CPU_PID=$(ps aux --sort=-%cpu | awk 'NR==2{print $2}')
+echo "=== PID: $CPU_PID ==="
+ps -T -p $CPU_PID -o tid,pcpu,comm | sort -k2 -rn | head -15
+```
+
+## 5. strace로 시스템 콜 추적
+
+```sh run
+CPU_PID=$(ps aux --sort=-%cpu | awk 'NR==2{print $2}')
+timeout {{duration}} strace -c -p $CPU_PID 2>&1 || true
+```
+
+## 6. 검증
+
+```verify expect=0
+LOAD=$(cat /proc/loadavg | awk '{print int($1)}')
+CORES=$(nproc)
+[ "$LOAD" -lt "$((CORES * 2))" ] && exit 0 || exit 1
+```
+
+## 7. AI 분석
+
+```ai
+위에서 수집한 CPU 부하, 상위 프로세스 목록, strace 시스템 콜 통계를 종합 분석하여:
+1. CPU 100% 원인 (무한루프, fork폭탄, 정상 부하 등)을 판별하라
+2. 해당 프로세스를 kill해도 안전한지 판단하라
+3. 재발 방지를 위한 cgroup 또는 nice 값 조정 방안을 제시하라
+```

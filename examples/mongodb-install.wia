@@ -1,0 +1,78 @@
+---
+wia: "1"
+title: MongoDB 설치 및 인증 설정
+agent: soomy
+inputs:
+  admin_user: { type: string, default: "admin" }
+  admin_pass: { type: secret, default: "" }
+---
+
+# MongoDB 설치 및 인증 설정
+
+## 1. MongoDB 리포지토리 추가
+
+```sh run
+sudo tee /etc/yum.repos.d/mongodb-org-7.0.repo > /dev/null <<EOF
+[mongodb-org-7.0]
+name=MongoDB Repository
+baseurl=https://repo.mongodb.org/yum/amazon/2023/mongodb-org/7.0/x86_64/
+gpgcheck=1
+enabled=1
+gpgkey=https://pgp.mongodb.com/server-7.0.asc
+EOF
+```
+
+## 2. MongoDB 설치 및 서비스 시작
+
+```sh run
+sudo dnf install -y mongodb-org
+sudo systemctl start mongod
+sudo systemctl enable mongod
+```
+
+## 3. 관리자 사용자 생성
+
+```sh run
+mongosh --quiet <<JS
+use admin
+db.createUser({
+  user: "{{admin_user}}",
+  pwd: "{{admin_pass}}",
+  roles: [
+    { role: "userAdminAnyDatabase", db: "admin" },
+    { role: "readWriteAnyDatabase", db: "admin" },
+    { role: "clusterAdmin", db: "admin" }
+  ]
+})
+JS
+```
+
+## 4. 인증 활성화
+
+```sh run
+sudo cp /etc/mongod.conf /etc/mongod.conf.bak
+sudo tee -a /etc/mongod.conf > /dev/null <<EOF
+
+security:
+  authorization: enabled
+EOF
+sudo systemctl restart mongod
+```
+
+## 5. 네트워크 바인딩 확인
+
+```sh run
+grep -A2 "^net:" /etc/mongod.conf
+```
+
+## 6. 검증
+
+```verify expect=0
+mongosh --quiet -u {{admin_user}} -p '{{admin_pass}}' --authenticationDatabase admin --eval "db.adminCommand('ping')" | grep -q ok
+```
+
+## 7. AI 분석
+
+```ai
+MongoDB 설치 및 인증 설정 결과를 분석하세요. 관리자 {{admin_user}} 계정의 권한이 적절한지, authorization이 활성화되었는지, bindIp가 보안 기준에 맞는지 점검하고 프로덕션 배포를 위한 추가 권고사항을 제시하세요.
+```

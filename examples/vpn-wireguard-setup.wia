@@ -1,0 +1,126 @@
+---
+wia: "1"
+title: WireGuard VPN 설치 및 설정
+agent: soomy
+inputs:
+  server_ip: { type: string, default: "10.0.0.1" }
+  client_ip: { type: string, default: "10.0.0.2" }
+  listen_port: { type: string, default: "51820" }
+---
+
+# WireGuard VPN 설치 및 설정
+
+## 1. WireGuard 설치
+
+```sh run
+if command -v wg &>/dev/null; then
+  echo "WireGuard 이미 설치됨: $(wg --version 2>&1 || echo 'version unknown')"
+else
+  echo "WireGuard 설치 시작..."
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update && sudo apt-get install -y wireguard
+  elif command -v yum &>/dev/null; then
+    sudo yum install -y epel-release && sudo yum install -y wireguard-tools
+  elif command -v dnf &>/dev/null; then
+    sudo dnf install -y wireguard-tools
+  fi
+fi
+echo ""
+echo "=== 커널 모듈 확인 ==="
+sudo modprobe wireguard 2>/dev/null && echo "wireguard 모듈 로드됨" || echo "wireguard 모듈 로드 실패 (커널 내장일 수 있음)"
+```
+
+## 2. 키 쌍 생성
+
+```sh run
+sudo mkdir -p /etc/wireguard
+if [ ! -f /etc/wireguard/server_privatekey ]; then
+  wg genkey | sudo tee /etc/wireguard/server_privatekey | wg pubkey | sudo tee /etc/wireguard/server_publickey
+  sudo chmod 600 /etc/wireguard/server_privatekey
+  echo "서버 키 쌍 생성 완료"
+else
+  echo "서버 키 쌍 이미 존재"
+fi
+echo "서버 Public Key: $(sudo cat /etc/wireguard/server_publickey)"
+echo ""
+if [ ! -f /etc/wireguard/client_privatekey ]; then
+  wg genkey | sudo tee /etc/wireguard/client_privatekey | wg pubkey | sudo tee /etc/wireguard/client_publickey
+  sudo chmod 600 /etc/wireguard/client_privatekey
+  echo "클라이언트 키 쌍 생성 완료"
+else
+  echo "클라이언트 키 쌍 이미 존재"
+fi
+echo "클라이언트 Public Key: $(sudo cat /etc/wireguard/client_publickey)"
+```
+
+## 3. 서버 설정 파일 생성
+
+```sh run
+CLIENT_PUBKEY=$(sudo cat /etc/wireguard/client_publickey)
+SERVER_PRIVKEY=$(sudo cat /etc/wireguard/server_privatekey)
+IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+
+sudo tee /etc/wireguard/wg0.conf > /dev/null <<WGEOF
+[Interface]
+Address = {{server_ip}}/24
+ListenPort = {{listen_port}}
+PrivateKey = ${SERVER_PRIVKEY}
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o ${IFACE} -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o ${IFACE} -j MASQUERADE
+
+[Peer]
+PublicKey = ${CLIENT_PUBKEY}
+AllowedIPs = {{client_ip}}/32
+WGEOF
+
+sudo chmod 600 /etc/wireguard/wg0.conf
+echo "서버 설정 파일 생성 완료: /etc/wireguard/wg0.conf"
+```
+
+## 4. IP 포워딩 및 방화벽 설정
+
+```sh run
+echo "=== IP 포워딩 활성화 ==="
+sudo sysctl -w net.ipv4.ip_forward=1
+grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf
+echo ""
+echo "=== 방화벽 포트 개방 ==="
+if command -v firewall-cmd &>/dev/null; then
+  sudo firewall-cmd --add-port={{listen_port}}/udp --permanent 2>/dev/null && sudo firewall-cmd --reload 2>/dev/null
+  echo "firewalld: 포트 {{listen_port}}/udp 개방"
+elif command -v ufw &>/dev/null; then
+  sudo ufw allow {{listen_port}}/udp 2>/dev/null
+  echo "ufw: 포트 {{listen_port}}/udp 개방"
+else
+  echo "방화벽 도구 미발견 — 수동 확인 필요"
+fi
+```
+
+## 5. WireGuard 인터페이스 시작
+
+```sh run
+sudo wg-quick up wg0 2>/dev/null || echo "wg0 이미 활성 또는 오류 발생"
+echo ""
+echo "=== WireGuard 상태 ==="
+sudo wg show wg0
+echo ""
+echo "=== 인터페이스 확인 ==="
+ip addr show wg0 2>/dev/null || echo "wg0 인터페이스 없음"
+```
+
+## 6. 검증
+
+```verify expect=0
+sudo wg show wg0 | grep -q 'interface: wg0'
+```
+
+## 7. AI 분석
+
+```ai
+WireGuard VPN 설정 결과를 분석해 주세요:
+1. 서버/클라이언트 키 쌍이 올바르게 생성되었는지
+2. wg0 인터페이스가 정상 동작 중인지
+3. IP 포워딩 및 NAT 규칙이 적절한지
+4. 방화벽 설정이 올바른지
+5. 클라이언트 설정 파일 생성을 위한 안내 (QR 코드 포함)
+```

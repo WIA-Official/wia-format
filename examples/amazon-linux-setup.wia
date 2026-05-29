@@ -1,0 +1,56 @@
+---
+wia: "1"
+title: Amazon Linux 2023 서버 초기 설정
+agent: soomy
+inputs:
+  hostname: { type: string, default: "my-server" }
+  timezone: { type: enum, of: [Asia/Seoul, Asia/Tokyo, US/Eastern, UTC], default: Asia/Seoul }
+---
+
+# Amazon Linux 2023 서버 초기 설정
+
+## 1. 시스템 업데이트
+
+```sh run
+sudo dnf update -y
+```
+
+## 2. 호스트명 설정
+
+```sh run
+sudo hostnamectl set-hostname {{hostname}}
+```
+
+## 3. 타임존 설정
+
+```sh run
+sudo timedatectl set-timezone {{timezone}}
+```
+
+## 4. 필수 패키지 설치
+
+```sh run
+sudo dnf install -y git vim curl wget htop tree jq
+```
+
+## 5. 방화벽 확인
+
+```sh run
+sudo systemctl status firewalld 2>/dev/null || echo "firewalld not installed (AWS SG handles this)"
+```
+
+## 6. 설정 확인
+
+```verify expect=0
+hostname
+```
+
+```verify expect=0
+timedatectl | grep -q "{{timezone}}"
+```
+
+## 7. AI 분석
+
+```ai
+위 서버 초기 설정 결과를 분석하고, 추가로 해야 할 보안 설정을 알려줘.
+```

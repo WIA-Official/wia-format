@@ -1,0 +1,176 @@
+---
+wia: "1"
+title: AWS Lambda 함수 배포 + API Gateway
+agent: soomy
+inputs:
+  function_name: { type: string }
+  runtime: { type: string, default: "python3.12" }
+  handler: { type: string, default: "lambda_function.handler" }
+---
+
+# AWS Lambda 함수 배포 + API Gateway
+
+## 1. IAM 실행 역할 생성
+
+```sh run
+echo "=== Lambda 실행 역할 생성 ==="
+TRUST_POLICY='{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"Service": "lambda.amazonaws.com"},
+    "Action": "sts:AssumeRole"
+  }]
+}'
+aws iam create-role \
+  --role-name {{function_name}}-role \
+  --assume-role-policy-document "$TRUST_POLICY" 2>&1 || echo "역할 이미 존재"
+
+aws iam attach-role-policy \
+  --role-name {{function_name}}-role \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+ROLE_ARN=$(aws iam get-role --role-name {{function_name}}-role --query 'Role.Arn' --output text)
+echo "역할 ARN: $ROLE_ARN"
+echo "IAM 전파 대기 (10초)..."
+sleep 10
+```
+
+## 2. Lambda 함수 코드 패키징
+
+```sh run
+WORK_DIR="/tmp/lambda-{{function_name}}"
+mkdir -p $WORK_DIR && cd $WORK_DIR
+
+cat <<'HANDLER' > lambda_function.py
+import json
+import datetime
+
+def handler(event, context):
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        },
+        'body': json.dumps({
+            'message': 'Hello from {{function_name}}',
+            'timestamp': datetime.datetime.utcnow().isoformat(),
+            'request_id': context.aws_request_id
+        })
+    }
+HANDLER
+
+cd $WORK_DIR && zip -r function.zip lambda_function.py
+echo "패키지 크기: $(du -h function.zip | cut -f1)"
+```
+
+## 3. Lambda 함수 생성/업데이트
+
+```sh run
+ROLE_ARN=$(aws iam get-role --role-name {{function_name}}-role --query 'Role.Arn' --output text)
+
+echo "=== Lambda 함수 배포 ==="
+aws lambda create-function \
+  --function-name {{function_name}} \
+  --runtime {{runtime}} \
+  --handler {{handler}} \
+  --role $ROLE_ARN \
+  --zip-file fileb:///tmp/lambda-{{function_name}}/function.zip \
+  --timeout 30 \
+  --memory-size 256 \
+  --environment '{"Variables":{"ENV":"production"}}' \
+  2>&1 || \
+aws lambda update-function-code \
+  --function-name {{function_name}} \
+  --zip-file fileb:///tmp/lambda-{{function_name}}/function.zip 2>&1
+
+echo ""
+aws lambda wait function-active --function-name {{function_name}} 2>/dev/null
+echo "Lambda 함수 배포 완료"
+```
+
+## 4. API Gateway (HTTP API) 연결
+
+```sh run
+echo "=== HTTP API Gateway 생성 ==="
+API_ID=$(aws apigatewayv2 create-api \
+  --name {{function_name}}-api \
+  --protocol-type HTTP \
+  --query 'ApiId' --output text 2>&1)
+echo "API ID: $API_ID"
+
+LAMBDA_ARN=$(aws lambda get-function --function-name {{function_name}} --query 'Configuration.FunctionArn' --output text)
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+REGION=$(aws configure get region)
+
+echo "=== Lambda 통합 생성 ==="
+INTEGRATION_ID=$(aws apigatewayv2 create-integration \
+  --api-id $API_ID \
+  --integration-type AWS_PROXY \
+  --integration-uri $LAMBDA_ARN \
+  --payload-format-version "2.0" \
+  --query 'IntegrationId' --output text)
+
+aws apigatewayv2 create-route \
+  --api-id $API_ID \
+  --route-key 'GET /' \
+  --target "integrations/$INTEGRATION_ID"
+
+aws apigatewayv2 create-stage \
+  --api-id $API_ID \
+  --stage-name prod \
+  --auto-deploy 2>&1
+
+echo "=== Lambda 권한 부여 ==="
+aws lambda add-permission \
+  --function-name {{function_name}} \
+  --statement-id apigateway-invoke \
+  --action lambda:InvokeFunction \
+  --principal apigateway.amazonaws.com \
+  --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*" 2>&1
+
+ENDPOINT="https://${API_ID}.execute-api.${REGION}.amazonaws.com/prod"
+echo "API 엔드포인트: $ENDPOINT"
+```
+
+## 5. 테스트 호출
+
+```sh run
+echo "=== Lambda 직접 호출 ==="
+aws lambda invoke \
+  --function-name {{function_name}} \
+  --payload '{}' \
+  /tmp/lambda-response.json 2>&1
+echo "응답:"
+cat /tmp/lambda-response.json | python3 -m json.tool
+
+echo ""
+echo "=== API Gateway 호출 ==="
+API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='{{function_name}}-api'].ApiId" --output text)
+REGION=$(aws configure get region)
+ENDPOINT="https://${API_ID}.execute-api.${REGION}.amazonaws.com/prod"
+curl -sf "$ENDPOINT" | python3 -m json.tool 2>/dev/null || echo "API Gateway 응답 대기 중 (몇 초 후 재시도)"
+```
+
+## 6. 검증
+
+```verify expect=0
+FUNC_STATE=$(aws lambda get-function --function-name {{function_name}} --query 'Configuration.State' --output text 2>/dev/null)
+echo "Lambda 상태: $FUNC_STATE"
+test "$FUNC_STATE" = "Active" && echo "Lambda 활성 확인" || echo "Lambda 비활성"
+API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='{{function_name}}-api'].ApiId" --output text 2>/dev/null)
+test -n "$API_ID" && echo "API Gateway 생성 확인: $API_ID" || echo "API Gateway 미생성"
+```
+
+## 7. AI 분석
+
+```ai
+Lambda 함수 {{function_name}} 배포 결과를 분석해 주세요:
+- 런타임 {{runtime}}, 핸들러 {{handler}} 구성 적합성
+- 메모리 256MB / 타임아웃 30초 설정의 적절성
+- API Gateway HTTP API 라우팅 및 CORS 설정
+- 콜드 스타트 최적화 (Provisioned Concurrency, SnapStart 등)
+- 보안: IAM 역할 최소 권한, API 키/인증 추가 필요성
+- 모니터링: CloudWatch 알람, X-Ray 트레이싱 권장
+```

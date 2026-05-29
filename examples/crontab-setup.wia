@@ -1,0 +1,62 @@
+---
+wia: "1"
+title: 크론탭 작업 등록
+agent: soomy
+inputs:
+  schedule: { type: string, default: "0 2 * * *" }
+  command: { type: string, default: "/usr/local/bin/backup.sh" }
+---
+
+# 크론탭 작업 등록
+
+## 1. 현재 크론탭 확인
+
+```sh run
+echo "=== 현재 등록된 크론 작업 ==="
+crontab -l 2>/dev/null || echo "크론탭이 비어 있습니다"
+```
+
+## 2. 명령어 실행 가능 여부 확인
+
+```sh run
+CMD_PATH=$(echo "{{command}}" | awk '{print $1}')
+echo "=== 명령어 확인: $CMD_PATH ==="
+which "$CMD_PATH" 2>/dev/null || ls -la "$CMD_PATH" 2>/dev/null || echo "경고: 명령어를 찾을 수 없습니다"
+echo ""
+echo "=== 스케줄 해석: {{schedule}} ==="
+# 분 시 일 월 요일
+echo "{{schedule}}" | awk '{
+  split("일 월 화 수 목 금 토", days, " ");
+  printf "분: %s, 시: %s, 일: %s, 월: %s, 요일: %s\n", $1, $2, $3, $4, $5
+}'
+```
+
+## 3. 크론탭 작업 등록
+
+```sh run
+CRON_ENTRY="{{schedule}} {{command}} >> /var/log/cron-{{command##*/}}.log 2>&1"
+(crontab -l 2>/dev/null | grep -v "{{command}}"; echo "$CRON_ENTRY") | crontab -
+echo "크론 작업 등록 완료"
+```
+
+## 4. 등록 확인
+
+```sh run
+echo "=== 업데이트된 크론탭 ==="
+crontab -l
+echo ""
+echo "=== crond 서비스 상태 ==="
+systemctl is-active crond 2>/dev/null || systemctl is-active cron 2>/dev/null || echo "cron 서비스 확인 불가"
+```
+
+## 5. 검증
+
+```verify expect=0
+crontab -l 2>/dev/null | grep -q "{{command}}" && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+크론탭 작업 설정을 분석해 주세요. 스케줄({{schedule}})의 실행 빈도, 로그 설정, 중복 실행 방지(flock) 여부를 검토하고, 모니터링(healthchecks.io), 에러 알림, systemd timer 전환 고려 사항을 제안해 주세요.
+```

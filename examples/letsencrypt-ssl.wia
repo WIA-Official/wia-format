@@ -1,0 +1,75 @@
+---
+wia: "1"
+title: Let's Encrypt SSL 인증서 발급 및 자동 갱신
+agent: soomy
+inputs:
+  domain: { type: string, default: "example.com" }
+  email: { type: string, default: "admin@example.com" }
+---
+
+# Let's Encrypt SSL 인증서 발급 및 자동 갱신
+
+## 1. Certbot 및 의존성 설치
+
+```sh run
+sudo dnf install -y certbot || sudo apt-get install -y certbot
+```
+
+## 2. 웹서버 감지 및 플러그인 설치
+
+```sh run
+if systemctl is-active --quiet nginx; then
+  sudo dnf install -y python3-certbot-nginx 2>/dev/null || sudo apt-get install -y python3-certbot-nginx
+  echo "WEBSERVER=nginx"
+elif systemctl is-active --quiet httpd || systemctl is-active --quiet apache2; then
+  sudo dnf install -y python3-certbot-apache 2>/dev/null || sudo apt-get install -y python3-certbot-apache
+  echo "WEBSERVER=apache"
+else
+  echo "WEBSERVER=standalone"
+fi
+```
+
+## 3. DNS A 레코드 확인
+
+```sh run
+dig +short {{domain}} A
+dig +short www.{{domain}} A
+```
+
+## 4. SSL 인증서 발급
+
+```sh run
+if systemctl is-active --quiet nginx; then
+  sudo certbot --nginx -d {{domain}} -d www.{{domain}} --non-interactive --agree-tos -m {{email}}
+elif systemctl is-active --quiet httpd || systemctl is-active --quiet apache2; then
+  sudo certbot --apache -d {{domain}} -d www.{{domain}} --non-interactive --agree-tos -m {{email}}
+else
+  sudo certbot certonly --standalone -d {{domain}} -d www.{{domain}} --non-interactive --agree-tos -m {{email}}
+fi
+```
+
+## 5. 인증서 파일 확인
+
+```sh run
+sudo ls -la /etc/letsencrypt/live/{{domain}}/
+sudo openssl x509 -in /etc/letsencrypt/live/{{domain}}/fullchain.pem -noout -dates -subject
+```
+
+## 6. 자동 갱신 설정 및 테스트
+
+```sh run
+sudo certbot renew --dry-run
+echo "0 3 * * * root certbot renew --quiet --post-hook 'systemctl reload nginx || systemctl reload httpd'" | sudo tee /etc/cron.d/certbot-renew
+```
+
+## 7. 검증
+
+```verify expect=0
+echo | openssl s_client -connect {{domain}}:443 -servername {{domain}} 2>/dev/null | openssl x509 -noout -checkend 86400
+```
+
+## 8. AI 분석
+
+```ai
+SSL 인증서 체인 유효성, TLS 버전 및 암호 스위트 보안 수준, HSTS 헤더 적용 여부를 분석하고 SSL Labs A+ 등급 달성을 위한 권고사항을 제시하세요.
+```

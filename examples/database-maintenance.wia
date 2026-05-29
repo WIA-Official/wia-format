@@ -8,9 +8,9 @@ agent:
     - slow query 종료는 반드시 확인 후
     - 디스크 80% 초과 시 즉시 정리 실행
 inputs:
-  db_host: { type: string, description: "DB 서버 호스트 (예: db.example.com)" }
+  db_host: { type: string, description: "DB 서버 호스트 (예: 10.0.2.97)" }
   db_name: { type: string, default: "cqm", description: "대상 데이터베이스명" }
-  db_user: { type: string, default: "dbuser", description: "DB 접속 계정" }
+  db_user: { type: string, default: "root", description: "DB 접속 계정" }
 ---
 
 # 데이터베이스 유지보수: {{db_name}} @ {{db_host}}

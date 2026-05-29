@@ -1,0 +1,87 @@
+---
+wia: "1"
+title: MySQL 자동 백업 설정 (mysqldump + cron)
+agent: soomy
+inputs:
+  db_name: { type: string, default: "appdb" }
+  backup_dir: { type: string, default: "/backup/mysql" }
+  retention_days: { type: string, default: "7" }
+---
+
+# MySQL 자동 백업 설정 (mysqldump + cron)
+
+## 1. 백업 디렉토리 생성
+
+```sh run
+sudo mkdir -p {{backup_dir}}
+sudo chmod 700 {{backup_dir}}
+sudo chown mysql:mysql {{backup_dir}}
+```
+
+## 2. 백업 스크립트 생성
+
+```sh run
+sudo tee /usr/local/bin/mysql-backup.sh > /dev/null <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+DB_NAME="{{db_name}}"
+BACKUP_DIR="{{backup_dir}}"
+RETENTION_DAYS={{retention_days}}
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.sql.gz"
+
+echo "[$(date)] Starting backup of ${DB_NAME}..."
+mysqldump --defaults-file=/root/.my.cnf \
+  --single-transaction \
+  --routines \
+  --triggers \
+  --events \
+  --databases "${DB_NAME}" | gzip > "${BACKUP_FILE}"
+
+chmod 600 "${BACKUP_FILE}"
+
+echo "[$(date)] Backup saved: ${BACKUP_FILE} ($(du -h "${BACKUP_FILE}" | cut -f1))"
+
+# Cleanup old backups
+find "${BACKUP_DIR}" -name "${DB_NAME}_*.sql.gz" -mtime +${RETENTION_DAYS} -delete
+DELETED=$(find "${BACKUP_DIR}" -name "${DB_NAME}_*.sql.gz" -mtime +${RETENTION_DAYS} | wc -l)
+echo "[$(date)] Cleanup complete. Removed ${DELETED} old backups."
+SCRIPT
+sudo chmod 700 /usr/local/bin/mysql-backup.sh
+```
+
+## 3. 크레덴셜 파일 설정
+
+```sh run
+sudo tee /root/.my.cnf > /dev/null <<EOF
+[mysqldump]
+user=root
+password=CHANGE_ME
+EOF
+sudo chmod 600 /root/.my.cnf
+```
+
+## 4. cron 작업 등록 (매일 새벽 2시)
+
+```sh run
+(sudo crontab -l 2>/dev/null | grep -v mysql-backup; echo "0 2 * * * /usr/local/bin/mysql-backup.sh >> /var/log/mysql-backup.log 2>&1") | sudo crontab -
+```
+
+## 5. 수동 백업 테스트 실행
+
+```sh run
+sudo /usr/local/bin/mysql-backup.sh
+```
+
+## 6. 검증
+
+```verify expect=0
+ls -la {{backup_dir}}/{{db_name}}_*.sql.gz 2>/dev/null | tail -1 | grep -q sql.gz
+```
+
+## 7. AI 분석
+
+```ai
+MySQL 백업 설정 결과를 분석하세요. mysqldump 옵션(single-transaction, routines, triggers)이 적절한지, 보존 기간 {{retention_days}}일이 적합한지, cron 스케줄이 올바른지, 백업 파일 권한이 안전한지 점검하고 백업 모니터링 및 복원 테스트 자동화 방안을 제안하세요.
+```

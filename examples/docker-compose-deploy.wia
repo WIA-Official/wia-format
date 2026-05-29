@@ -1,0 +1,72 @@
+---
+wia: "1"
+title: Docker Compose 기반 서비스 배포
+agent: soomy
+inputs:
+  project_dir: { type: string }
+  compose_file: { type: string, default: "docker-compose.yml" }
+---
+
+# Docker Compose 기반 서비스 배포
+
+## 1. 프로젝트 디렉토리 확인
+
+```sh run
+if [ ! -d "{{project_dir}}" ]; then
+  echo "ERROR: 프로젝트 디렉토리가 존재하지 않습니다: {{project_dir}}"
+  exit 1
+fi
+ls -la {{project_dir}}/{{compose_file}}
+```
+
+## 2. Compose 파일 문법 검증
+
+```verify expect=0
+cd {{project_dir}} && docker compose -f {{compose_file}} config --quiet
+```
+
+## 3. 기존 서비스 상태 확인
+
+```sh run
+cd {{project_dir}} && docker compose -f {{compose_file}} ps 2>/dev/null || echo "No existing services running"
+```
+
+## 4. 이미지 빌드 및 풀
+
+```sh run
+cd {{project_dir}} && docker compose -f {{compose_file}} pull --ignore-buildable
+cd {{project_dir}} && docker compose -f {{compose_file}} build --parallel
+```
+
+## 5. 서비스 배포 (Rolling Update)
+
+```sh run
+cd {{project_dir}} && docker compose -f {{compose_file}} up -d --remove-orphans --force-recreate
+```
+
+## 6. 컨테이너 상태 검증
+
+```verify expect=0
+FMT='table {{.Name}}\t{{.Status}}'
+cd {{project_dir}} && docker compose -f {{compose_file}} ps --format "$FMT" | grep -v "Exit"
+```
+
+## 7. 헬스체크 대기
+
+```sh run
+echo "Waiting 15s for health checks..."
+sleep 15
+cd {{project_dir}} && docker compose -f {{compose_file}} ps
+docker compose -f {{compose_file}} --project-directory {{project_dir}} logs --tail=20
+```
+
+## 8. AI 분석
+
+```ai
+배포 결과를 분석하여 다음을 보고해 주세요:
+1. 모든 서비스가 정상 기동되었는지 (Exited 또는 Restarting 상태가 없는지)
+2. 헬스체크 통과 여부
+3. 로그에서 에러나 경고가 발견되었는지
+4. 리소스 사용량에 문제가 없는지
+5. 롤백이 필요한 경우 실행할 명령어 제안
+```

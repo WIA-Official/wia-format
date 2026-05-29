@@ -1,0 +1,80 @@
+---
+wia: "1"
+title: 로그 조사 및 디버깅 절차
+agent: soomy
+inputs:
+  log_path: { type: string, default: "/var/log/syslog" }
+  search_term: { type: string }
+---
+
+# 로그 조사 및 디버깅 절차
+
+## 1. 로그 파일 기본 정보 확인
+
+```sh run
+ls -lh {{log_path}}
+file {{log_path}}
+wc -l {{log_path}}
+echo "--- 최근 20줄 ---"
+tail -20 {{log_path}}
+```
+
+## 2. 검색어 기반 로그 필터링
+
+```sh run
+echo "=== '{{search_term}}' 검색 결과 (최근 100건) ==="
+grep -n "{{search_term}}" {{log_path}} | tail -100
+echo ""
+echo "=== 총 매칭 건수 ==="
+grep -c "{{search_term}}" {{log_path}} || echo "0건"
+```
+
+## 3. 시간대별 로그 빈도 분석
+
+```sh run
+echo "=== 시간대별 로그 빈도 (최근 24시간) ==="
+awk '{print $1, $2, $3}' {{log_path}} | sort | uniq -c | sort -rn | head -24
+echo ""
+echo "=== 에러/경고 키워드 빈도 ==="
+grep -iEc "(error|fail|critical|warning|panic|fatal)" {{log_path}} || echo "0건"
+grep -ioE "(error|fail|critical|warning|panic|fatal)" {{log_path}} | sort | uniq -c | sort -rn
+```
+
+## 4. 에러 컨텍스트 추출
+
+```sh run
+echo "=== '{{search_term}}' 전후 컨텍스트 (최근 5건) ==="
+grep -n -B 3 -A 5 "{{search_term}}" {{log_path}} | tail -80
+```
+
+## 5. 관련 프로세스 및 시스템 상태 확인
+
+```sh run
+echo "=== journalctl 최근 에러 ==="
+sudo journalctl -p err --since "1 hour ago" --no-pager | tail -30
+echo ""
+echo "=== dmesg 커널 에러 ==="
+sudo dmesg --level=err,warn | tail -20
+echo ""
+echo "=== 디스크/메모리 상태 ==="
+df -h / /var /tmp 2>/dev/null
+free -h
+```
+
+## 6. 검증
+
+```verify expect=0
+test -f {{log_path}} && echo "로그 파일 존재 확인" || echo "로그 파일 없음"
+grep -q "{{search_term}}" {{log_path}} && echo "검색어 매칭 확인" || echo "검색어 매칭 없음 - 검색 범위 확장 필요"
+```
+
+## 7. AI 분석
+
+```ai
+로그 조사 결과를 종합 분석해 주세요:
+- {{log_path}}에서 '{{search_term}}' 관련 패턴 및 근본 원인 추정
+- 시간대별 로그 빈도에서 이상 징후 여부
+- 에러/경고 메시지의 심각도 분류
+- 권장 조치 사항 및 모니터링 알림 설정 제안
+- 로그 로테이션 상태 점검 결과
+```

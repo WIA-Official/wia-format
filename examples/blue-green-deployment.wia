@@ -1,0 +1,133 @@
+---
+wia: "1"
+title: 블루-그린 배포 절차
+agent: soomy
+inputs:
+  app_name: { type: string }
+  blue_port: { type: string, default: "3000" }
+  green_port: { type: string, default: "3001" }
+---
+
+# 블루-그린 배포 절차
+
+## 1. 현재 활성 환경 확인
+
+```sh run
+echo "=== 현재 {{app_name}} 배포 상태 ==="
+echo "--- Blue (포트 {{blue_port}}) ---"
+curl -sf -o /dev/null -w "HTTP %{http_code}" http://localhost:{{blue_port}}/health 2>/dev/null || echo "응답 없음"
+echo ""
+echo "--- Green (포트 {{green_port}}) ---"
+curl -sf -o /dev/null -w "HTTP %{http_code}" http://localhost:{{green_port}}/health 2>/dev/null || echo "응답 없음"
+echo ""
+echo "--- Nginx 현재 업스트림 ---"
+grep -A 5 "upstream {{app_name}}" /etc/nginx/conf.d/{{app_name}}.conf 2>/dev/null || echo "Nginx 설정 없음 - 신규 설정 필요"
+```
+
+## 2. 새 버전을 비활성 환경(Green)에 배포
+
+```sh run
+echo "=== Green 환경 (포트 {{green_port}})에 새 버전 배포 ==="
+APP_DIR="/opt/{{app_name}}"
+GREEN_DIR="${APP_DIR}/green"
+mkdir -p $GREEN_DIR
+
+if [ -f "${APP_DIR}/deploy.sh" ]; then
+  echo "커스텀 배포 스크립트 실행"
+  PORT={{green_port}} bash "${APP_DIR}/deploy.sh"
+else
+  echo "기본 배포: 소스 복사 및 의존성 설치"
+  if [ -f "${APP_DIR}/package.json" ]; then
+    cp -r ${APP_DIR}/package.json ${APP_DIR}/src ${GREEN_DIR}/ 2>/dev/null
+    cd $GREEN_DIR && npm install --production 2>/dev/null
+    PORT={{green_port}} pm2 start npm --name "{{app_name}}-green" -- start 2>/dev/null || echo "pm2 또는 npm start로 수동 시작 필요"
+  fi
+fi
+
+echo "Green 환경 배포 완료, 헬스체크 대기..."
+sleep 5
+```
+
+## 3. Green 환경 헬스체크 및 스모크 테스트
+
+```sh run
+echo "=== Green 환경 스모크 테스트 ==="
+RETRIES=0
+MAX_RETRIES=10
+until curl -sf http://localhost:{{green_port}}/health >/dev/null 2>&1; do
+  RETRIES=$((RETRIES+1))
+  if [ $RETRIES -ge $MAX_RETRIES ]; then
+    echo "FAIL: Green 환경 헬스체크 실패 (${MAX_RETRIES}회 시도)"
+    exit 1
+  fi
+  echo "대기 중... ($RETRIES/$MAX_RETRIES)"
+  sleep 3
+done
+echo "Green 헬스체크 통과"
+echo ""
+echo "--- 응답 확인 ---"
+curl -sf http://localhost:{{green_port}}/health | python3 -m json.tool 2>/dev/null || echo "JSON 아닌 응답"
+```
+
+## 4. 트래픽 전환 (Blue -> Green)
+
+```sh run
+echo "=== Nginx 업스트림 전환: Blue({{blue_port}}) -> Green({{green_port}}) ==="
+sudo tee /etc/nginx/conf.d/{{app_name}}.conf > /dev/null <<NGINX
+upstream {{app_name}} {
+    server 127.0.0.1:{{green_port}};
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        proxy_pass http://{{app_name}};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+NGINX
+
+sudo nginx -t && sudo systemctl reload nginx
+echo "트래픽 전환 완료"
+```
+
+## 5. 전환 후 검증
+
+```verify expect=0
+echo "=== 트래픽 전환 검증 ==="
+HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost/health 2>/dev/null)
+if [ "$HTTP_CODE" = "200" ]; then
+  echo "프론트 헬스체크 정상 (HTTP 200)"
+  GREEN_CODE=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:{{green_port}}/health 2>/dev/null)
+  echo "Green 직접 접근: HTTP $GREEN_CODE"
+  exit 0
+else
+  echo "FAIL: 전환 후 헬스체크 실패 (HTTP $HTTP_CODE) - 롤백 필요"
+  exit 1
+fi
+```
+
+## 6. 롤백 절차 (필요 시)
+
+```sh run
+echo "=== 롤백이 필요한 경우 아래 명령 실행 ==="
+echo "sudo sed -i 's/{{green_port}}/{{blue_port}}/' /etc/nginx/conf.d/{{app_name}}.conf"
+echo "sudo nginx -t && sudo systemctl reload nginx"
+echo "# Blue({{blue_port}})로 즉시 롤백됩니다"
+```
+
+## 7. AI 분석
+
+```ai
+{{app_name}} 블루-그린 배포 결과를 분석해 주세요:
+- Blue({{blue_port}}) -> Green({{green_port}}) 전환이 정상적으로 완료되었는지
+- 스모크 테스트 결과의 적합성
+- 무중단 배포가 실제로 달성되었는지
+- 카나리 배포 또는 가중치 기반 트래픽 분배로 개선할 점
+- 자동 롤백 조건 설정 권장사항
+```

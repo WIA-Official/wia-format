@@ -1,7 +1,6 @@
 ---
 wia: "1"
 title: WIA SOOM 서버 건강 점검
-lang: ko
 agent: soomy
 inputs:
   threshold: { type: number, default: 90 }
@@ -24,7 +23,7 @@ free | awk 'NR==2{printf "%d%%", $3/$2*100}'
 ## 3. PM2 서비스 상태
 
 ```verify expect=0
-pm2 pid my-api > /dev/null 2>&1
+pm2 pid soom-api > /dev/null 2>&1
 ```
 
 ## 4. PM2 전체 목록
@@ -36,5 +35,11 @@ pm2 jlist 2>/dev/null | python3 -c "import sys,json; [print(f'{p[\"name\"]:20s} 
 ## 5. 최근 에러 로그
 
 ```sh run
-find /var/log/app -name "*.log" -mmin -60 -exec grep -l "ERROR\|FATAL" {} \; 2>/dev/null | head -5 || echo "No recent errors"
+find /home/ec2-user/logs -name "*.log" -mmin -60 -exec grep -l "ERROR\|FATAL" {} \; 2>/dev/null | head -5 || echo "No recent errors"
+```
+
+## 6. AI 분석
+
+```ai
+위 서버 건강 점검 결과를 분석해 주세요. 디스크/메모리 사용량, PM2 서비스 상태, 에러 로그를 기반으로 즉시 조치가 필요한 항목과 예방 조치를 제안해 주세요.
 ```

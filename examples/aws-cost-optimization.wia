@@ -1,0 +1,160 @@
+---
+wia: "1"
+title: AWS 비용 최적화
+agent: soomy
+inputs:
+  profile: { type: string, default: "default" }
+---
+
+# AWS 비용 최적화
+
+## 1. 현재 비용 현황
+
+```sh run
+echo "=== 이번 달 비용 (서비스별) ==="
+MONTH_START=$(date +%Y-%m-01)
+TODAY=$(date +%Y-%m-%d)
+aws ce get-cost-and-usage \
+  --time-period Start=$MONTH_START,End=$TODAY \
+  --granularity MONTHLY \
+  --metrics BlendedCost \
+  --group-by Type=DIMENSION,Key=SERVICE \
+  --profile {{profile}} \
+  --query 'ResultsByTime[0].Groups[?Metrics.BlendedCost.Amount!=`0`].[Keys[0],Metrics.BlendedCost.Amount]' \
+  --output table 2>&1 || echo "Cost Explorer 접근 불가"
+echo ""
+echo "=== 지난 3개월 추이 ==="
+THREE_MONTHS_AGO=$(date -d "3 months ago" +%Y-%m-01 2>/dev/null || date +%Y-%m-01)
+aws ce get-cost-and-usage \
+  --time-period Start=$THREE_MONTHS_AGO,End=$TODAY \
+  --granularity MONTHLY \
+  --metrics BlendedCost \
+  --profile {{profile}} \
+  --query 'ResultsByTime[*].[TimePeriod.Start,Total.BlendedCost.Amount]' \
+  --output table 2>&1 || echo "비용 추이 조회 불가"
+```
+
+## 2. 미사용 EC2 리소스
+
+```sh run
+echo "=== 중지된 EC2 인스턴스 (EBS 비용 발생 중) ==="
+aws ec2 describe-instances \
+  --filters Name=instance-state-name,Values=stopped \
+  --profile {{profile}} \
+  --query 'Reservations[*].Instances[*].[InstanceId,InstanceType,Tags[?Key==`Name`].Value|[0],LaunchTime]' \
+  --output table 2>&1
+echo ""
+echo "=== 연결되지 않은 EBS 볼륨 ==="
+aws ec2 describe-volumes \
+  --filters Name=status,Values=available \
+  --profile {{profile}} \
+  --query 'Volumes[*].[VolumeId,Size,VolumeType,CreateTime]' \
+  --output table 2>&1
+echo ""
+echo "=== 미사용 Elastic IP ==="
+aws ec2 describe-addresses \
+  --profile {{profile}} \
+  --query 'Addresses[?AssociationId==null].[PublicIp,AllocationId]' \
+  --output table 2>&1
+```
+
+## 3. 라이트사이징 분석
+
+```sh run
+echo "=== EC2 인스턴스 유형 및 활용률 ==="
+aws ec2 describe-instances \
+  --filters Name=instance-state-name,Values=running \
+  --profile {{profile}} \
+  --query 'Reservations[*].Instances[*].[InstanceId,InstanceType,Tags[?Key==`Name`].Value|[0],Placement.AvailabilityZone]' \
+  --output table 2>&1
+echo ""
+echo "=== CPU 사용률 (최근 7일 평균) ==="
+for instance in $(aws ec2 describe-instances --filters Name=instance-state-name,Values=running --profile {{profile}} --query 'Reservations[*].Instances[*].InstanceId' --output text 2>/dev/null | head -5); do
+  AVG_CPU=$(aws cloudwatch get-metric-statistics \
+    --namespace AWS/EC2 \
+    --metric-name CPUUtilization \
+    --dimensions Name=InstanceId,Value=$instance \
+    --start-time $(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%S) \
+    --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+    --period 604800 \
+    --statistics Average \
+    --profile {{profile}} \
+    --query 'Datapoints[0].Average' \
+    --output text 2>/dev/null)
+  echo "  $instance: 평균 CPU ${AVG_CPU:-N/A}%"
+  if [ -n "$AVG_CPU" ] && [ "$(echo "$AVG_CPU < 10" | bc -l 2>/dev/null)" = "1" ]; then
+    echo "    권고: 인스턴스 축소 또는 중지 검토"
+  fi
+done
+```
+
+## 4. 예약 인스턴스 및 Savings Plans
+
+```sh run
+echo "=== 활성 예약 인스턴스 ==="
+aws ec2 describe-reserved-instances \
+  --filters Name=state,Values=active \
+  --profile {{profile}} \
+  --query 'ReservedInstances[*].[InstanceType,InstanceCount,End,OfferingType]' \
+  --output table 2>&1
+echo ""
+echo "=== Savings Plans ==="
+aws savingsplans describe-savings-plans \
+  --profile {{profile}} \
+  --query 'savingsPlans[*].[savingsPlanType,commitment,state,end]' \
+  --output table 2>&1 || echo "Savings Plans 조회 불가"
+echo ""
+echo "=== 예약 인스턴스 권고 ==="
+aws ce get-reservation-purchase-recommendation \
+  --service EC2 \
+  --profile {{profile}} \
+  --query 'Recommendations[0].RecommendationDetails[*].[InstanceDetails.EC2InstanceDetails.InstanceType,EstimatedMonthlySavingsAmount,UpfrontCost]' \
+  --output table 2>&1 || echo "RI 권고 조회 불가"
+```
+
+## 5. 기타 비용 절감 항목
+
+```sh run
+echo "=== S3 버킷 크기 (상위 10개) ==="
+for bucket in $(aws s3api list-buckets --profile {{profile}} --query 'Buckets[*].Name' --output text 2>/dev/null | tr '\t' '\n' | head -10); do
+  SIZE=$(aws cloudwatch get-metric-statistics \
+    --namespace AWS/S3 \
+    --metric-name BucketSizeBytes \
+    --dimensions Name=BucketName,Value=$bucket Name=StorageType,Value=StandardStorage \
+    --start-time $(date -u -d '2 days ago' +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%S) \
+    --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+    --period 86400 \
+    --statistics Average \
+    --profile {{profile}} \
+    --query 'Datapoints[0].Average' \
+    --output text 2>/dev/null)
+  if [ -n "$SIZE" ] && [ "$SIZE" != "None" ]; then
+    SIZE_GB=$(echo "scale=2; $SIZE/1073741824" | bc -l 2>/dev/null || echo "N/A")
+    echo "  $bucket: ${SIZE_GB} GB"
+  fi
+done
+echo ""
+echo "=== NAT Gateway 비용 확인 ==="
+aws ec2 describe-nat-gateways \
+  --filter Name=state,Values=available \
+  --profile {{profile}} \
+  --query 'NatGateways[*].[NatGatewayId,SubnetId,State]' \
+  --output table 2>&1
+```
+
+## 6. 검증
+
+```verify expect=0
+aws ce get-cost-and-usage --time-period Start=$(date +%Y-%m-01),End=$(date +%Y-%m-%d) --granularity MONTHLY --metrics BlendedCost --profile {{profile}} --query 'ResultsByTime[0].Total.BlendedCost.Amount' --output text 2>/dev/null | grep -qE '^[0-9]'
+```
+
+## 7. AI 분석
+
+```ai
+AWS 비용 최적화 분석 결과를 검토해 주세요:
+1. 즉시 절감 가능 항목 (미사용 리소스 정리) 및 예상 절감액
+2. 라이트사이징 권고 (저활용 인스턴스)
+3. 예약 인스턴스 또는 Savings Plans 도입 효과
+4. S3 수명주기 정책 및 스토리지 클래스 최적화
+5. 월별 비용 추이 분석 및 이상 지출 감지
+```

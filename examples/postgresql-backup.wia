@@ -1,0 +1,84 @@
+---
+wia: "1"
+title: PostgreSQL 백업 설정 (pg_dump)
+agent: soomy
+inputs:
+  db_name: { type: string, default: "appdb" }
+  backup_dir: { type: string, default: "/backup/postgresql" }
+---
+
+# PostgreSQL 백업 설정 (pg_dump)
+
+## 1. 백업 디렉토리 생성
+
+```sh run
+sudo mkdir -p {{backup_dir}}
+sudo chown postgres:postgres {{backup_dir}}
+sudo chmod 700 {{backup_dir}}
+```
+
+## 2. 백업 스크립트 생성
+
+```sh run
+sudo tee /usr/local/bin/pg-backup.sh > /dev/null <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+
+DB_NAME="{{db_name}}"
+BACKUP_DIR="{{backup_dir}}"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.dump"
+LOG_FILE="/var/log/pg-backup.log"
+
+echo "[$(date)] Starting pg_dump for ${DB_NAME}..." >> "${LOG_FILE}"
+
+sudo -u postgres pg_dump \
+  --format=custom \
+  --compress=9 \
+  --verbose \
+  --file="${BACKUP_FILE}" \
+  "${DB_NAME}" 2>> "${LOG_FILE}"
+
+sudo chown postgres:postgres "${BACKUP_FILE}"
+chmod 600 "${BACKUP_FILE}"
+
+SIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
+echo "[$(date)] Backup complete: ${BACKUP_FILE} (${SIZE})" >> "${LOG_FILE}"
+
+# 7일 이상 된 백업 삭제
+find "${BACKUP_DIR}" -name "${DB_NAME}_*.dump" -mtime +7 -delete
+echo "[$(date)] Old backups cleaned." >> "${LOG_FILE}"
+SCRIPT
+sudo chmod 700 /usr/local/bin/pg-backup.sh
+```
+
+## 3. cron 등록 (매일 새벽 3시)
+
+```sh run
+(sudo crontab -u postgres -l 2>/dev/null | grep -v pg-backup; echo "0 3 * * * /usr/local/bin/pg-backup.sh") | sudo crontab -u postgres -
+```
+
+## 4. WAL 아카이빙 설정 확인
+
+```sh run
+sudo -u postgres psql -c "SHOW archive_mode;"
+sudo -u postgres psql -c "SHOW wal_level;"
+```
+
+## 5. 수동 백업 테스트
+
+```sh run
+sudo /usr/local/bin/pg-backup.sh
+```
+
+## 6. 백업 무결성 검증
+
+```verify expect=0
+LATEST=$(ls -t {{backup_dir}}/{{db_name}}_*.dump 2>/dev/null | head -1) && sudo -u postgres pg_restore --list "$LATEST" > /dev/null 2>&1
+```
+
+## 7. AI 분석
+
+```ai
+PostgreSQL 백업 설정 결과를 분석하세요. pg_dump --format=custom이 적절한지, 압축 레벨 9가 성능에 미치는 영향, WAL 아카이빙과의 연계 가능성, PITR(Point-In-Time Recovery) 구성을 위한 추가 설정, 백업 파일의 복원 테스트 자동화 방안을 제안하세요.
+```

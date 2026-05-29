@@ -1,0 +1,67 @@
+---
+wia: "1"
+title: Redis 설치 및 메모리 최적화
+agent: soomy
+inputs:
+  max_memory: { type: string, default: "256mb" }
+  password: { type: secret, default: "" }
+---
+
+# Redis 설치 및 메모리 최적화
+
+## 1. Redis 패키지 설치
+
+```sh run
+sudo dnf install -y redis6
+```
+
+## 2. Redis 보안 및 메모리 설정
+
+```sh run
+sudo cp /etc/redis6/redis6.conf /etc/redis6/redis6.conf.bak
+sudo sed -i "s/^# requirepass .*/requirepass {{password}}/" /etc/redis6/redis6.conf
+sudo sed -i "s/^# maxmemory .*/maxmemory {{max_memory}}/" /etc/redis6/redis6.conf
+sudo sed -i "s/^# maxmemory-policy .*/maxmemory-policy allkeys-lru/" /etc/redis6/redis6.conf
+sudo sed -i "s/^bind .*/bind 127.0.0.1 -::1/" /etc/redis6/redis6.conf
+```
+
+## 3. 커널 파라미터 최적화
+
+```sh run
+sudo sysctl -w vm.overcommit_memory=1
+sudo sysctl -w net.core.somaxconn=65535
+echo "vm.overcommit_memory = 1" | sudo tee -a /etc/sysctl.d/99-redis.conf
+echo "net.core.somaxconn = 65535" | sudo tee -a /etc/sysctl.d/99-redis.conf
+```
+
+## 4. 서비스 시작 및 자동 시작 등록
+
+```sh run
+sudo systemctl start redis6
+sudo systemctl enable redis6
+```
+
+## 5. Persistence 설정 확인
+
+```sh run
+redis6-cli -a '{{password}}' CONFIG GET save 2>/dev/null
+redis6-cli -a '{{password}}' CONFIG GET appendonly 2>/dev/null
+```
+
+## 6. 검증
+
+```verify expect=0
+redis6-cli -a '{{password}}' -e PING 2>/dev/null | grep -q PONG
+```
+
+## 7. 메모리 상태 검증
+
+```verify expect=0
+redis6-cli -a '{{password}}' INFO memory 2>/dev/null | grep -q maxmemory_human
+```
+
+## 8. AI 분석
+
+```ai
+Redis 설치 및 메모리 최적화 결과를 분석하세요. maxmemory가 {{max_memory}}로 설정되었는지, eviction 정책이 allkeys-lru인지, 비밀번호 인증이 활성화되었는지, 커널 파라미터가 적절한지 확인하고 프로덕션 운영을 위한 추가 최적화 방안을 제시하세요.
+```

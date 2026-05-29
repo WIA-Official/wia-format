@@ -1,0 +1,95 @@
+---
+wia: "1"
+title: 헬스체크 엔드포인트 구현 및 검증
+agent: soomy
+inputs:
+  service_url: { type: string, default: "http://localhost:3000" }
+  health_path: { type: string, default: "/health" }
+---
+
+# 헬스체크 엔드포인트 구현 및 검증
+
+## 1. 기본 헬스체크 요청 테스트
+
+```sh run
+echo "=== 기본 헬스체크: {{service_url}}{{health_path}} ==="
+HTTP_CODE=$(curl -sf -o /tmp/health_response.json -w "%{http_code}" "{{service_url}}{{health_path}}" 2>/dev/null)
+echo "HTTP 상태 코드: $HTTP_CODE"
+if [ -f /tmp/health_response.json ]; then
+  echo "응답 본문:"
+  cat /tmp/health_response.json | python3 -m json.tool 2>/dev/null || cat /tmp/health_response.json
+fi
+```
+
+## 2. 응답 시간 및 연결 상태 측정
+
+```sh run
+echo "=== 헬스체크 응답 시간 측정 (5회) ==="
+for i in $(seq 1 5); do
+  RESULT=$(curl -sf -w "HTTP:%{http_code} 시간:%{time_total}s DNS:%{time_namelookup}s 연결:%{time_connect}s" -o /dev/null "{{service_url}}{{health_path}}" 2>/dev/null)
+  echo "  [$i] $RESULT"
+done
+echo ""
+echo "=== TCP 포트 상태 ==="
+PORT=$(echo "{{service_url}}" | grep -oP ':\K[0-9]+' || echo "80")
+HOST=$(echo "{{service_url}}" | sed 's|https\?://||;s|:.*||;s|/.*||')
+ss -tlnp | grep ":$PORT " || echo "포트 $PORT 리스닝 없음"
+```
+
+## 3. 의존성 헬스체크 (DB, Redis, 외부 서비스)
+
+```sh run
+echo "=== 주요 의존성 상태 ==="
+echo "--- 데이터베이스 연결 ---"
+curl -sf "{{service_url}}{{health_path}}/db" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "DB 헬스체크 엔드포인트 없음"
+echo "--- Redis 연결 ---"
+curl -sf "{{service_url}}{{health_path}}/redis" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "Redis 헬스체크 엔드포인트 없음"
+echo "--- Readiness ---"
+curl -sf "{{service_url}}/ready" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "Readiness 엔드포인트 없음"
+echo "--- Liveness ---"
+curl -sf "{{service_url}}/live" 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "Liveness 엔드포인트 없음"
+```
+
+## 4. 부하 상태에서 헬스체크 안정성 테스트
+
+```sh run
+echo "=== 동시 헬스체크 요청 (10 동시, 50 총) ==="
+if command -v ab &>/dev/null; then
+  ab -n 50 -c 10 -q "{{service_url}}{{health_path}}/" 2>&1 | grep -E "^(Requests per|Time per|Failed|Complete)"
+elif command -v wrk &>/dev/null; then
+  wrk -t2 -c10 -d5s "{{service_url}}{{health_path}}"
+else
+  echo "ab/wrk 미설치 - 순차 요청 테스트"
+  FAIL=0
+  for i in $(seq 1 20); do
+    curl -sf -o /dev/null "{{service_url}}{{health_path}}" || FAIL=$((FAIL+1))
+  done
+  echo "20회 요청 중 실패: ${FAIL}회"
+fi
+```
+
+## 5. 검증
+
+```verify expect=0
+HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "{{service_url}}{{health_path}}" 2>/dev/null)
+if [ "$HTTP_CODE" = "200" ]; then
+  echo "헬스체크 정상 (HTTP 200)"
+  RESPONSE_TIME=$(curl -sf -o /dev/null -w "%{time_total}" "{{service_url}}{{health_path}}" 2>/dev/null)
+  echo "응답 시간: ${RESPONSE_TIME}s"
+  exit 0
+else
+  echo "헬스체크 실패 (HTTP $HTTP_CODE)"
+  exit 1
+fi
+```
+
+## 6. AI 분석
+
+```ai
+헬스체크 엔드포인트 검증 결과를 분석해 주세요:
+- {{service_url}}{{health_path}} 응답 상태 및 응답 시간 적정성
+- 의존성 헬스체크 (DB, Redis) 구현 여부 및 개선점
+- 부하 테스트에서 안정성 평가
+- Kubernetes liveness/readiness probe 설정 권장값
+- 헬스체크 응답에 포함해야 할 정보 (버전, 업타임, 의존성 상태 등)
+```

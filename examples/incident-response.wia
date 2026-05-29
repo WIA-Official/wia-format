@@ -1,14 +1,13 @@
 ---
 wia: "1"
 title: 장애 대응 런북
-lang: ko
 agent:
   role: SRE Engineer
   rules:
     - 파괴적 명령 실행 전 반드시 확인
     - 복구 후 검증 필수
 inputs:
-  service_name: { type: enum, of: [my-api, my-worker, my-frontend, my-backend], default: my-api }
+  service_name: { type: enum, of: [soom-api, soom-live, soomy-web, soom-web], default: soom-api }
 ---
 
 # 장애 대응: {{service_name}}

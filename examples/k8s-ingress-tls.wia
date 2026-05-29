@@ -1,0 +1,145 @@
+---
+wia: "1"
+title: Ingress TLS 설정 + cert-manager
+agent: soomy
+inputs:
+  domain: { type: string }
+  namespace: { type: string, default: "default" }
+---
+
+# Ingress TLS 설정 + cert-manager
+
+## 1. cert-manager 설치
+
+```sh run
+echo "=== cert-manager 설치 ==="
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+echo ""
+echo "=== cert-manager Pod 대기 ==="
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=120s
+kubectl get pods -n cert-manager
+```
+
+## 2. Let's Encrypt ClusterIssuer 생성
+
+```sh run
+cat <<ISSUER | kubectl apply -f -
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@{{domain}}
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@{{domain}}
+    privateKeySecretRef:
+      name: letsencrypt-staging-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+ISSUER
+echo "ClusterIssuer 생성 완료"
+```
+
+## 3. Ingress 리소스 생성 (TLS 적용)
+
+```sh run
+cat <<INGRESS | kubectl apply -n {{namespace}} -f -
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{domain}}-ingress
+  namespace: {{namespace}}
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - {{domain}}
+      secretName: {{domain}}-tls
+  rules:
+    - host: {{domain}}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web-service
+                port:
+                  number: 80
+INGRESS
+echo "Ingress 생성 완료"
+```
+
+## 4. 인증서 발급 상태 확인
+
+```sh run
+echo "=== Certificate 상태 ==="
+kubectl get certificate -n {{namespace}} -o wide
+echo ""
+echo "=== CertificateRequest 상태 ==="
+kubectl get certificaterequest -n {{namespace}}
+echo ""
+echo "=== Challenge 상태 (발급 중인 경우) ==="
+kubectl get challenges -n {{namespace}} 2>/dev/null || echo "진행 중인 Challenge 없음"
+echo ""
+echo "=== ClusterIssuer 상태 ==="
+kubectl get clusterissuer
+```
+
+## 5. TLS Secret 및 Ingress 검증
+
+```verify expect=0
+echo "=== TLS Secret 확인 ==="
+kubectl get secret {{domain}}-tls -n {{namespace}} 2>/dev/null && echo "TLS Secret 존재" || echo "TLS Secret 미생성 - 인증서 발급 대기 중"
+echo ""
+echo "=== Ingress 상태 ==="
+kubectl get ingress -n {{namespace}} {{domain}}-ingress -o wide
+echo ""
+CERT_READY=$(kubectl get certificate -n {{namespace}} -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+echo "인증서 Ready: $CERT_READY"
+test "$CERT_READY" = "True" && echo "TLS 인증서 검증 통과" || echo "인증서 발급 진행 중 - 잠시 후 재확인"
+```
+
+## 6. HTTPS 접속 테스트
+
+```sh run
+echo "=== HTTPS 연결 테스트 ==="
+curl -sf -o /dev/null -w "HTTP %{http_code}, SSL: %{ssl_verify_result}" "https://{{domain}}" 2>/dev/null || echo "외부 접근 불가 - DNS/방화벽 확인 필요"
+echo ""
+echo "=== 인증서 정보 ==="
+echo | openssl s_client -connect {{domain}}:443 -servername {{domain}} 2>/dev/null | openssl x509 -noout -dates -subject -issuer 2>/dev/null || echo "SSL 핸드셰이크 실패"
+```
+
+## 7. AI 분석
+
+```ai
+{{domain}} Ingress TLS 설정 결과를 분석해 주세요:
+- cert-manager 및 ClusterIssuer 상태
+- Let's Encrypt 인증서 발급 성공 여부 및 실패 시 원인
+- Ingress 어노테이션 (SSL 리다이렉트, 프록시 설정) 적절성
+- 인증서 자동 갱신 (만료 30일 전) 동작 확인
+- 보안 강화: HSTS, OCSP Stapling, TLS 최소 버전 설정 권장
+- 네임스페이스 {{namespace}}에서의 네트워크 정책 권장사항
+```

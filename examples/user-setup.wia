@@ -1,0 +1,80 @@
+---
+wia: "1"
+title: 사용자 생성 및 SSH 키 등록
+agent: soomy
+inputs:
+  username: { type: string, default: "deploy" }
+  shell: { type: string, default: "/bin/bash" }
+  ssh_pubkey: { type: string, default: "ssh-ed25519 AAAAC3... user@host" }
+  sudo_nopasswd: { type: string, default: "true" }
+---
+
+# 사용자 생성 및 SSH 키 등록
+
+## 1. 사용자 생성
+
+```sh run
+if id "{{username}}" &>/dev/null; then
+  echo "User {{username}} already exists"
+  id {{username}}
+else
+  sudo useradd -m -s {{shell}} {{username}}
+  echo "User {{username}} created"
+  id {{username}}
+fi
+```
+
+## 2. sudo 권한 부여
+
+```sh run
+if [ "{{sudo_nopasswd}}" = "true" ]; then
+  echo "{{username}} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/{{username}}
+else
+  echo "{{username}} ALL=(ALL:ALL) ALL" | sudo tee /etc/sudoers.d/{{username}}
+fi
+sudo chmod 440 /etc/sudoers.d/{{username}}
+sudo visudo -c
+```
+
+## 3. SSH 디렉토리 생성
+
+```sh run
+sudo mkdir -p /home/{{username}}/.ssh
+sudo chmod 700 /home/{{username}}/.ssh
+sudo chown {{username}}:{{username}} /home/{{username}}/.ssh
+```
+
+## 4. SSH 공개키 등록
+
+```sh run
+echo "{{ssh_pubkey}}" | sudo tee /home/{{username}}/.ssh/authorized_keys
+sudo chmod 600 /home/{{username}}/.ssh/authorized_keys
+sudo chown {{username}}:{{username}} /home/{{username}}/.ssh/authorized_keys
+```
+
+## 5. 사용자 환경 설정
+
+```sh run
+sudo cp /etc/skel/.bashrc /home/{{username}}/.bashrc 2>/dev/null || true
+sudo cp /etc/skel/.profile /home/{{username}}/.profile 2>/dev/null || true
+sudo chown {{username}}:{{username}} /home/{{username}}/.bashrc /home/{{username}}/.profile 2>/dev/null || true
+```
+
+## 6. 패스워드 로그인 비활성화 (키 전용)
+
+```sh run
+sudo passwd -l {{username}}
+sudo passwd -S {{username}}
+```
+
+## 7. 검증
+
+```verify expect=0
+id {{username}} && [ -f /home/{{username}}/.ssh/authorized_keys ] && sudo visudo -c && [ -f /etc/sudoers.d/{{username}} ]
+```
+
+## 8. AI 분석
+
+```ai
+사용자 설정 결과를 분석하세요. {{username}} 계정의 sudo 권한, SSH 키 등록, 패스워드 잠금 상태를 확인하고 최소 권한 원칙에 따른 추가 보안 조치를 제안해 주세요.
+```

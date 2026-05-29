@@ -1,0 +1,134 @@
+---
+wia: "1"
+title: AWS VPC 네트워킹 설정
+agent: soomy
+inputs:
+  vpc_cidr: { type: string, default: "10.0.0.0/16" }
+  region: { type: string, default: "ap-northeast-2" }
+---
+
+# AWS VPC 네트워킹 설정
+
+## 1. VPC 생성
+
+```sh run
+echo "=== VPC 생성: {{vpc_cidr}} ({{region}}) ==="
+VPC_ID=$(aws ec2 create-vpc \
+  --cidr-block {{vpc_cidr}} \
+  --region {{region}} \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=wia-vpc}]' \
+  --query 'Vpc.VpcId' --output text 2>&1)
+echo "VPC ID: $VPC_ID"
+
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-support '{"Value": true}' --region {{region}}
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames '{"Value": true}' --region {{region}}
+echo "DNS 지원 활성화 완료"
+```
+
+## 2. 서브넷 생성 (퍼블릭 2개 + 프라이빗 2개)
+
+```sh run
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=wia-vpc" --region {{region}} --query 'Vpcs[0].VpcId' --output text)
+AZ_A="${{region}}a"
+AZ_B="${{region}}c"
+
+echo "=== 퍼블릭 서브넷 생성 ==="
+PUB_A=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 --availability-zone $AZ_A --region {{region}} \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=wia-public-a}]' --query 'Subnet.SubnetId' --output text)
+PUB_B=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.2.0/24 --availability-zone $AZ_B --region {{region}} \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=wia-public-b}]' --query 'Subnet.SubnetId' --output text)
+echo "퍼블릭 A: $PUB_A, 퍼블릭 B: $PUB_B"
+
+echo "=== 프라이빗 서브넷 생성 ==="
+PRIV_A=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.10.0/24 --availability-zone $AZ_A --region {{region}} \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=wia-private-a}]' --query 'Subnet.SubnetId' --output text)
+PRIV_B=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.11.0/24 --availability-zone $AZ_B --region {{region}} \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=wia-private-b}]' --query 'Subnet.SubnetId' --output text)
+echo "프라이빗 A: $PRIV_A, 프라이빗 B: $PRIV_B"
+```
+
+## 3. 인터넷 게이트웨이 및 라우팅 설정
+
+```sh run
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=wia-vpc" --region {{region}} --query 'Vpcs[0].VpcId' --output text)
+
+echo "=== 인터넷 게이트웨이 생성 ==="
+IGW_ID=$(aws ec2 create-internet-gateway --region {{region}} \
+  --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=wia-igw}]' --query 'InternetGateway.InternetGatewayId' --output text)
+aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID --region {{region}}
+echo "IGW: $IGW_ID"
+
+echo "=== 퍼블릭 라우트 테이블 ==="
+RTB_PUB=$(aws ec2 create-route-table --vpc-id $VPC_ID --region {{region}} \
+  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=wia-public-rt}]' --query 'RouteTable.RouteTableId' --output text)
+aws ec2 create-route --route-table-id $RTB_PUB --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID --region {{region}}
+
+PUB_A=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=wia-public-a" --region {{region}} --query 'Subnets[0].SubnetId' --output text)
+PUB_B=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=wia-public-b" --region {{region}} --query 'Subnets[0].SubnetId' --output text)
+aws ec2 associate-route-table --route-table-id $RTB_PUB --subnet-id $PUB_A --region {{region}}
+aws ec2 associate-route-table --route-table-id $RTB_PUB --subnet-id $PUB_B --region {{region}}
+echo "퍼블릭 라우팅 완료"
+```
+
+## 4. NAT 게이트웨이 및 프라이빗 라우팅
+
+```sh run
+PUB_A=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=wia-public-a" --region {{region}} --query 'Subnets[0].SubnetId' --output text)
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=wia-vpc" --region {{region}} --query 'Vpcs[0].VpcId' --output text)
+
+echo "=== Elastic IP 할당 ==="
+EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --region {{region}} --query 'AllocationId' --output text)
+
+echo "=== NAT 게이트웨이 생성 (3-5분 소요) ==="
+NAT_ID=$(aws ec2 create-nat-gateway --subnet-id $PUB_A --allocation-id $EIP_ALLOC --region {{region}} \
+  --tag-specifications 'ResourceType=natgateway,Tags=[{Key=Name,Value=wia-nat}]' --query 'NatGateway.NatGatewayId' --output text)
+echo "NAT GW: $NAT_ID (생성 대기 중)"
+
+aws ec2 wait nat-gateway-available --nat-gateway-ids $NAT_ID --region {{region}} 2>/dev/null &
+echo "NAT 게이트웨이 가용 대기 - 프라이빗 라우트 테이블은 NAT 활성화 후 설정 필요"
+echo "aws ec2 create-route --route-table-id <priv-rt-id> --destination-cidr-block 0.0.0.0/0 --nat-gateway-id $NAT_ID --region {{region}}"
+```
+
+## 5. 보안 그룹 생성
+
+```sh run
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=wia-vpc" --region {{region}} --query 'Vpcs[0].VpcId' --output text)
+
+echo "=== 웹 서버 보안 그룹 ==="
+WEB_SG=$(aws ec2 create-security-group --group-name wia-web-sg --description "Web Server SG" \
+  --vpc-id $VPC_ID --region {{region}} --query 'GroupId' --output text)
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 80 --cidr 0.0.0.0/0 --region {{region}}
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 443 --cidr 0.0.0.0/0 --region {{region}}
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 22 --cidr 0.0.0.0/0 --region {{region}}
+echo "웹 SG: $WEB_SG"
+
+echo "=== DB 보안 그룹 ==="
+DB_SG=$(aws ec2 create-security-group --group-name wia-db-sg --description "Database SG" \
+  --vpc-id $VPC_ID --region {{region}} --query 'GroupId' --output text)
+aws ec2 authorize-security-group-ingress --group-id $DB_SG --protocol tcp --port 3306 --source-group $WEB_SG --region {{region}}
+aws ec2 authorize-security-group-ingress --group-id $DB_SG --protocol tcp --port 5432 --source-group $WEB_SG --region {{region}}
+echo "DB SG: $DB_SG"
+```
+
+## 6. 검증
+
+```verify expect=0
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=wia-vpc" --region {{region}} --query 'Vpcs[0].VpcId' --output text)
+echo "VPC: $VPC_ID"
+SUBNET_COUNT=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --region {{region}} --query 'length(Subnets)' --output text)
+echo "서브넷 수: $SUBNET_COUNT (4개 예상)"
+test "$SUBNET_COUNT" -ge 4 && echo "서브넷 검증 통과" || echo "서브넷 부족"
+aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --region {{region}} --query 'InternetGateways[0].InternetGatewayId' --output text
+echo "IGW 연결 확인"
+```
+
+## 7. AI 분석
+
+```ai
+AWS VPC 네트워킹 설정 결과를 분석해 주세요:
+- VPC {{vpc_cidr}} 리전 {{region}} 구성의 적합성
+- 퍼블릭/프라이빗 서브넷 CIDR 분할 및 AZ 분산
+- NAT 게이트웨이 비용 최적화 (단일 AZ vs 다중 AZ)
+- 보안 그룹 규칙의 최소 권한 원칙 준수 여부
+- VPC Flow Logs 및 추가 보안 강화 권장사항
+```

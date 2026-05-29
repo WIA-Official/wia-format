@@ -1,0 +1,158 @@
+---
+wia: "1"
+title: 백업 복원 테스트
+agent: soomy
+inputs:
+  backup_path: { type: string, default: "/backup" }
+  restore_target: { type: string, default: "/tmp/restore-test" }
+---
+
+# 백업 복원 테스트
+
+## 1. 백업 파일 무결성 확인
+
+```sh run
+echo "=== 백업 경로 내용 ==="
+ls -lhrt {{backup_path}}/ 2>/dev/null | tail -10 || echo "백업 경로를 찾을 수 없음: {{backup_path}}"
+echo ""
+echo "=== 최신 백업 파일 ==="
+LATEST=$(ls -t {{backup_path}}/ 2>/dev/null | head -1)
+if [ -n "$LATEST" ]; then
+  FULL_PATH="{{backup_path}}/$LATEST"
+  echo "파일: $FULL_PATH"
+  echo "크기: $(du -sh "$FULL_PATH" | awk '{print $1}')"
+  echo "수정일: $(stat -c '%y' "$FULL_PATH" 2>/dev/null)"
+  echo ""
+  echo "=== 파일 유형 ==="
+  file "$FULL_PATH"
+fi
+```
+
+## 2. 체크섬 및 아카이브 검증
+
+```sh run
+LATEST=$(ls -t {{backup_path}}/ 2>/dev/null | head -1)
+FULL_PATH="{{backup_path}}/$LATEST"
+
+if [ -n "$FULL_PATH" ] && [ -f "$FULL_PATH" ]; then
+  echo "=== SHA256 체크섬 ==="
+  sha256sum "$FULL_PATH"
+
+  echo ""
+  echo "=== 아카이브 무결성 테스트 ==="
+  case "$FULL_PATH" in
+    *.tar.gz|*.tgz)
+      tar -tzf "$FULL_PATH" > /dev/null 2>&1 && echo "tar.gz 무결성: OK" || echo "tar.gz 무결성: FAIL"
+      echo "파일 수: $(tar -tzf "$FULL_PATH" 2>/dev/null | wc -l)"
+      ;;
+    *.gz)
+      gzip -t "$FULL_PATH" 2>&1 && echo "gzip 무결성: OK" || echo "gzip 무결성: FAIL"
+      ;;
+    *.zip)
+      unzip -t "$FULL_PATH" > /dev/null 2>&1 && echo "zip 무결성: OK" || echo "zip 무결성: FAIL"
+      ;;
+    *)
+      echo "알려지지 않은 형식 — 수동 검증 필요"
+      ;;
+  esac
+else
+  echo "검증할 백업 파일 없음"
+fi
+```
+
+## 3. 복원 테스트 실행
+
+```sh run
+mkdir -p {{restore_target}}
+LATEST=$(ls -t {{backup_path}}/ 2>/dev/null | head -1)
+FULL_PATH="{{backup_path}}/$LATEST"
+
+echo "=== 복원 대상: {{restore_target}} ==="
+echo "=== 사용 가능 디스크 ==="
+df -h {{restore_target}} | tail -1
+
+if [ -n "$FULL_PATH" ] && [ -f "$FULL_PATH" ]; then
+  echo ""
+  echo "=== 복원 시작: $FULL_PATH ==="
+  START=$(date +%s)
+
+  case "$FULL_PATH" in
+    *.tar.gz|*.tgz)
+      tar -xzf "$FULL_PATH" -C {{restore_target}} 2>&1
+      ;;
+    *.sql.gz)
+      cp "$FULL_PATH" {{restore_target}}/
+      gunzip -k {{restore_target}}/$(basename "$FULL_PATH") 2>/dev/null
+      ;;
+    *.sql)
+      cp "$FULL_PATH" {{restore_target}}/
+      ;;
+    *.gz)
+      cp "$FULL_PATH" {{restore_target}}/
+      gunzip -k {{restore_target}}/$(basename "$FULL_PATH") 2>/dev/null
+      ;;
+    *)
+      cp "$FULL_PATH" {{restore_target}}/
+      ;;
+  esac
+
+  END=$(date +%s)
+  ELAPSED=$((END - START))
+  echo ""
+  echo "복원 소요 시간: ${ELAPSED}초"
+  echo ""
+  echo "=== 복원된 파일 ==="
+  ls -lhR {{restore_target}}/ | head -20
+else
+  echo "복원할 백업 파일 없음"
+fi
+```
+
+## 4. 복원 데이터 검증
+
+```sh run
+echo "=== 복원 결과 요약 ==="
+RESTORE_SIZE=$(du -sh {{restore_target}} 2>/dev/null | awk '{print $1}')
+RESTORE_COUNT=$(find {{restore_target}} -type f 2>/dev/null | wc -l)
+echo "복원 경로: {{restore_target}}"
+echo "총 크기: ${RESTORE_SIZE:-0}"
+echo "파일 수: ${RESTORE_COUNT}"
+echo ""
+
+echo "=== SQL 파일 검증 (있는 경우) ==="
+SQL_FILE=$(find {{restore_target}} -name '*.sql' -type f 2>/dev/null | head -1)
+if [ -n "$SQL_FILE" ]; then
+  echo "SQL 파일: $SQL_FILE"
+  echo "라인 수: $(wc -l < "$SQL_FILE")"
+  echo "처음 5줄:"
+  head -5 "$SQL_FILE"
+fi
+```
+
+## 5. 테스트 정리
+
+```sh run
+echo "=== 복원 테스트 정리 ==="
+rm -rf {{restore_target}}
+echo "{{restore_target}} 삭제 완료"
+echo ""
+echo "=== 디스크 공간 확인 ==="
+df -h / | tail -1
+```
+
+## 6. 검증
+
+```verify expect=0
+test ! -d {{restore_target}} && echo "정리 완료"
+```
+
+## 7. AI 분석
+
+```ai
+백업 복원 테스트 결과를 분석해 주세요:
+1. 백업 파일 무결성이 확인되었는지
+2. 복원 소요 시간과 RTO 목표 대비 평가
+3. 복원된 데이터의 완전성 (파일 수, 크기 비교)
+4. 발견된 문제점 및 위험 요소
+5. 백업/복원 프로세스 개선 권고 사항
+```

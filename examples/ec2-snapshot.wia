@@ -1,0 +1,57 @@
+---
+wia: "1"
+title: EC2 EBS 스냅샷 생성 및 검증
+agent: soomy
+inputs:
+  volume_id: { type: string, default: "vol-0123456789abcdef0" }
+---
+
+# EC2 EBS 스냅샷 생성 및 검증
+
+## 1. 볼륨 상태 확인
+
+```sh run
+aws ec2 describe-volumes --volume-ids {{volume_id}} \
+  --query 'Volumes[0].[VolumeId,State,Size,VolumeType,Attachments[0].InstanceId]' --output table
+```
+
+## 2. 스냅샷 생성
+
+```sh run
+SNAPSHOT_ID=$(aws ec2 create-snapshot \
+  --volume-id {{volume_id}} \
+  --description "Backup $(date +%Y-%m-%d) - {{volume_id}}" \
+  --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=backup-{{volume_id}}-$(date +%Y%m%d)},{Key=CreatedBy,Value=soomy-runbook}]" \
+  --query 'SnapshotId' --output text)
+echo "생성된 스냅샷: $SNAPSHOT_ID"
+echo "$SNAPSHOT_ID" > /tmp/latest_snapshot_id.txt
+```
+
+## 3. 스냅샷 완료 대기
+
+```sh run
+SNAPSHOT_ID=$(cat /tmp/latest_snapshot_id.txt)
+aws ec2 wait snapshot-completed --snapshot-ids "$SNAPSHOT_ID" --cli-read-timeout 600
+echo "스냅샷 완료: $SNAPSHOT_ID"
+```
+
+## 4. 스냅샷 상태 확인
+
+```sh run
+SNAPSHOT_ID=$(cat /tmp/latest_snapshot_id.txt)
+aws ec2 describe-snapshots --snapshot-ids "$SNAPSHOT_ID" \
+  --query 'Snapshots[0].[SnapshotId,State,VolumeSize,StartTime,Description]' --output table
+```
+
+## 5. 검증
+
+```verify expect=0
+SNAPSHOT_ID=$(cat /tmp/latest_snapshot_id.txt)
+aws ec2 describe-snapshots --snapshot-ids "$SNAPSHOT_ID" --query 'Snapshots[0].State' --output text | grep -q "completed" && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+EBS 스냅샷 생성 결과를 분석해 주세요. 스냅샷 크기, 소요 시간, 태그 설정을 확인하고, 자동 스냅샷 수명 주기(DLM), 교차 리전 복사, 비용 최적화 방안을 제안해 주세요.
+```

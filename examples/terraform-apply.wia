@@ -1,0 +1,59 @@
+---
+wia: "1"
+title: Terraform Plan 및 Apply 실행
+agent: soomy
+inputs:
+  tf_dir: { type: string, default: "./infra" }
+---
+
+# Terraform Plan 및 Apply 실행
+
+## 1. Terraform 설치 확인
+
+```sh run
+terraform version 2>/dev/null || {
+  sudo dnf install -y dnf-plugins-core 2>/dev/null
+  sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo 2>/dev/null
+  sudo dnf install -y terraform 2>/dev/null || {
+    curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o /tmp/terraform.zip
+    sudo unzip -o /tmp/terraform.zip -d /usr/local/bin/
+  }
+  terraform version
+}
+```
+
+## 2. Terraform 초기화
+
+```sh run
+cd {{tf_dir}} && terraform init -upgrade
+```
+
+## 3. Terraform Plan
+
+```sh run
+cd {{tf_dir}} && terraform plan -out=tfplan -detailed-exitcode 2>&1; echo "exit_code=$?"
+```
+
+## 4. Terraform Apply
+
+```sh run
+cd {{tf_dir}} && terraform apply tfplan
+```
+
+## 5. 상태 확인
+
+```sh run
+cd {{tf_dir}} && terraform show -json | python3 -m json.tool | head -50
+```
+
+## 6. 검증
+
+```verify expect=0
+cd {{tf_dir}} && terraform plan -detailed-exitcode 2>&1; test $? -eq 0 && echo 0 || echo 1
+```
+
+## 7. AI 분석
+
+```ai
+Terraform apply 결과를 분석해 주세요. 생성/변경/삭제된 리소스를 요약하고, state 파일 관리(원격 백엔드), 보안(민감 변수 관리), 드리프트 감지 방안을 제안해 주세요.
+```

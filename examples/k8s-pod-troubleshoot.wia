@@ -1,0 +1,114 @@
+---
+wia: "1"
+title: Pod 장애 진단
+agent: soomy
+inputs:
+  pod_name: { type: string, default: "my-pod" }
+  namespace: { type: string, default: "default" }
+---
+
+# Pod 장애 진단
+
+## 1. Pod 상태 확인
+
+```sh run
+echo "=== Pod 상태 ==="
+kubectl get pod {{pod_name}} -n {{namespace}} -o wide 2>&1
+echo ""
+echo "=== Pod 이벤트 ==="
+kubectl get events -n {{namespace}} --field-selector involvedObject.name={{pod_name}} --sort-by='.lastTimestamp' 2>&1 | tail -20
+echo ""
+echo "=== Pod 상세 정보 ==="
+kubectl describe pod {{pod_name}} -n {{namespace}} 2>&1 | tail -40
+```
+
+## 2. 컨테이너 로그 분석
+
+```sh run
+echo "=== 현재 컨테이너 로그 (최근 100줄) ==="
+kubectl logs {{pod_name}} -n {{namespace}} --tail=100 2>&1
+echo ""
+echo "=== 이전 컨테이너 로그 (재시작된 경우) ==="
+kubectl logs {{pod_name}} -n {{namespace}} --previous --tail=50 2>&1 || echo "이전 컨테이너 로그 없음"
+```
+
+## 3. 장애 유형별 진단
+
+```sh run
+POD_STATUS=$(kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{.status.phase}' 2>/dev/null)
+CONTAINER_STATUS=$(kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{.status.containerStatuses[0].state}' 2>/dev/null)
+RESTART_COUNT=$(kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null)
+
+echo "Pod Phase: $POD_STATUS"
+echo "재시작 횟수: $RESTART_COUNT"
+echo ""
+
+echo "=== OOMKilled 확인 ==="
+kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{range .status.containerStatuses[*]}{.name}: {.lastState.terminated.reason}{"\n"}{end}' 2>/dev/null
+echo ""
+
+echo "=== 리소스 요청/제한 ==="
+kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{range .spec.containers[*]}Container: {.name}{"\n"}  CPU req: {.resources.requests.cpu} / limit: {.resources.limits.cpu}{"\n"}  Mem req: {.resources.requests.memory} / limit: {.resources.limits.memory}{"\n"}{end}' 2>/dev/null
+echo ""
+
+echo "=== 이미지 정보 ==="
+kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{range .spec.containers[*]}{.name}: {.image}{"\n"}{end}' 2>/dev/null
+echo ""
+
+echo "=== ImagePullBackOff 확인 ==="
+kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{range .status.containerStatuses[*]}{.name}: {.state.waiting.reason} - {.state.waiting.message}{"\n"}{end}' 2>/dev/null
+```
+
+## 4. 노드 및 네트워크 상태
+
+```sh run
+NODE=$(kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{.spec.nodeName}' 2>/dev/null)
+echo "배치 노드: $NODE"
+echo ""
+if [ -n "$NODE" ]; then
+  echo "=== 노드 상태 ==="
+  kubectl describe node "$NODE" 2>/dev/null | grep -A 5 'Conditions:' | head -10
+  echo ""
+  echo "=== 노드 리소스 ==="
+  kubectl top node "$NODE" 2>/dev/null || echo "metrics-server 미설치"
+fi
+echo ""
+echo "=== Pod 네트워크 ==="
+kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='Pod IP: {.status.podIP}{"\n"}Host IP: {.status.hostIP}{"\n"}' 2>/dev/null
+echo ""
+echo "=== 관련 서비스 ==="
+kubectl get svc -n {{namespace}} 2>/dev/null | head -10
+```
+
+## 5. 관련 리소스 점검
+
+```sh run
+echo "=== ReplicaSet / Deployment ==="
+OWNER=$(kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}' 2>/dev/null)
+echo "소유자: $OWNER"
+echo ""
+if echo "$OWNER" | grep -q "ReplicaSet"; then
+  RS_NAME=$(echo "$OWNER" | cut -d/ -f2)
+  kubectl describe rs "$RS_NAME" -n {{namespace}} 2>/dev/null | tail -15
+fi
+echo ""
+echo "=== 같은 네임스페이스 Pod 상태 ==="
+kubectl get pods -n {{namespace}} --sort-by='.status.startTime' 2>/dev/null | tail -10
+```
+
+## 6. 검증
+
+```verify expect=0
+kubectl get pod {{pod_name}} -n {{namespace}} -o jsonpath='{.status.phase}' 2>/dev/null | grep -qiE '(Running|Succeeded)'
+```
+
+## 7. AI 분석
+
+```ai
+Pod({{pod_name}}) 장애 진단 결과를 분석해 주세요:
+1. 장애 유형 분류 (CrashLoopBackOff / ImagePullBackOff / OOMKilled / Pending 등)
+2. 근본 원인 분석 (로그, 이벤트, 리소스 기반)
+3. 즉시 조치 사항 (명령어 포함)
+4. 리소스 요청/제한 적절성 평가
+5. 재발 방지를 위한 권고 사항
+```

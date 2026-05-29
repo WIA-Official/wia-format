@@ -1,0 +1,53 @@
+---
+wia: "1"
+title: 클러스터 상태 전체 점검
+agent: soomy
+inputs:
+  context: { type: string, default: "default" }
+---
+
+# 클러스터 상태 전체 점검
+
+## 1. 노드 상태 확인
+
+```sh run
+kubectl get nodes --context={{context}} -o wide
+```
+
+## 2. 전체 Pod 상태 확인
+
+```sh run
+kubectl get pods --all-namespaces --context={{context}} --field-selector=status.phase!=Running
+```
+
+## 3. 서비스 및 엔드포인트 확인
+
+```sh run
+kubectl get svc --all-namespaces --context={{context}} -o wide
+kubectl get endpoints --all-namespaces --context={{context}} | grep '<none>' || echo "모든 엔드포인트 정상"
+```
+
+## 4. 최근 이벤트 확인
+
+```sh run
+kubectl get events --all-namespaces --context={{context}} --sort-by='.lastTimestamp' | tail -30
+```
+
+## 5. 리소스 사용량 확인
+
+```sh run
+kubectl top nodes --context={{context}} 2>/dev/null || echo "metrics-server 미설치"
+kubectl top pods --all-namespaces --context={{context}} --sort-by=cpu 2>/dev/null | head -20 || true
+```
+
+## 6. 검증
+
+```verify expect=0
+kubectl get nodes --context={{context}} --no-headers | awk '{print $2}' | grep -v Ready | wc -l
+```
+
+## 7. AI 분석
+
+```ai
+위 클러스터 점검 결과를 분석하여 비정상 노드, 실패 Pod, 엔드포인트 누락, 경고 이벤트를 요약하고 조치 사항을 권고해 주세요.
+```

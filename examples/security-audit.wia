@@ -158,5 +158,11 @@ echo "다음 명령으로 보고서를 다운로드하세요:"
 echo "scp {{server_user}}@{{server_ip}} → 로컬 필요 시 sftp 사용"
 ```
 
+## 11. AI 감사 최종 요약
+
+```ai
+보안 감사 전체 결과를 최종 요약해 주세요. 가장 시급한 취약점 Top 3, 준수 상태 점수, 다음 감사까지 해야 할 조치 목록을 정리해 주세요.
+```
+
 > src: https://www.cisecurity.org/insights/white-papers/cis-controls-v8
 > src: https://www.nist.gov/cyberframework

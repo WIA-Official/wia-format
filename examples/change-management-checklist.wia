@@ -1,0 +1,128 @@
+---
+wia: "1"
+title: 변경 관리 체크리스트
+agent: soomy
+inputs:
+  change_id: { type: string, default: "CHG-001" }
+  service_name: { type: string, default: "my-service" }
+---
+
+# 변경 관리 체크리스트
+
+## 1. 사전 점검 (Pre-Deploy)
+
+```sh run
+echo "=========================================="
+echo "  변경 관리: {{change_id}}"
+echo "  대상 서비스: {{service_name}}"
+echo "  실행 시각: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "=========================================="
+echo ""
+echo "=== 시스템 상태 스냅샷 ==="
+echo "Load Average: $(cat /proc/loadavg)"
+echo "메모리: $(free -h | grep Mem | awk '{print $3"/"$2}')"
+echo "디스크: $(df -h / | tail -1 | awk '{print $5, "사용"}')"
+echo ""
+echo "=== 대상 서비스 상태 ==="
+systemctl status {{service_name}} 2>/dev/null | head -5 || echo "systemd 서비스 아님"
+docker ps --filter name={{service_name}} --format "table {{{{.Names}}}}\t{{{{.Status}}}}\t{{{{.Ports}}}}" 2>/dev/null || true
+echo ""
+echo "=== 현재 활성 연결 ==="
+ss -s | head -5
+echo ""
+echo "=== 롤백 준비 ==="
+SNAPSHOT_DIR="/tmp/change-{{change_id}}-snapshot"
+mkdir -p "$SNAPSHOT_DIR"
+systemctl show {{service_name}} --property=ExecStart,Environment 2>/dev/null > "$SNAPSHOT_DIR/service-config.txt" || true
+echo "스냅샷 저장: $SNAPSHOT_DIR"
+```
+
+## 2. 카나리 배포 체크
+
+```sh run
+echo "=== 카나리 배포 체크리스트 ==="
+echo ""
+echo "[체크] 변경 사항 검토"
+echo "  - 코드 리뷰 완료 여부: ___"
+echo "  - 테스트 통과 여부: ___"
+echo "  - 설정 변경 diff 확인: ___"
+echo ""
+echo "[체크] 롤백 계획"
+echo "  - 롤백 명령어 준비: ___"
+echo "  - 롤백 소요 시간 예상: ___"
+echo "  - 데이터 마이그레이션 포함 여부: ___"
+echo ""
+echo "[체크] 영향 범위"
+echo "  - 영향받는 서비스 목록: ___"
+echo "  - 다운타임 예상: ___"
+echo "  - 고객 공지 필요 여부: ___"
+echo ""
+echo "=== 의존 서비스 상태 ==="
+for svc in nginx mysql redis; do
+  STATUS=$(systemctl is-active $svc 2>/dev/null || echo "없음")
+  echo "  $svc: $STATUS"
+done
+```
+
+## 3. 변경 실행 및 모니터링
+
+```sh run
+echo "=== 변경 실행 시각: $(date '+%Y-%m-%d %H:%M:%S') ==="
+echo ""
+echo "=== 실시간 로그 모니터링 시작 ==="
+echo "(변경 작업을 별도 터미널에서 실행하세요)"
+echo ""
+echo "모니터링 명령어:"
+echo "  journalctl -u {{service_name}} -f"
+echo "  tail -f /var/log/{{service_name}}/*.log"
+echo ""
+echo "=== 현재 에러율 기준선 ==="
+sudo journalctl -u {{service_name}} --since "5 minutes ago" --no-pager 2>/dev/null | grep -ciE '(error|exception|fail)' | xargs -I{} echo "최근 5분 에러: {}건"
+echo ""
+echo "=== 응답 시간 기준선 ==="
+if command -v curl &>/dev/null; then
+  for i in 1 2 3; do
+    curl -sS -o /dev/null -w "요청 $i: %{time_total}s\n" http://localhost:8080/health 2>/dev/null || true
+  done
+fi
+```
+
+## 4. 배포 후 검증 (Post-Deploy)
+
+```sh run
+echo "=== 배포 후 검증: $(date '+%Y-%m-%d %H:%M:%S') ==="
+echo ""
+echo "=== 서비스 상태 ==="
+systemctl status {{service_name}} 2>/dev/null | head -8 || echo "systemd 서비스 아님"
+echo ""
+echo "=== 에러 로그 확인 (배포 후 5분) ==="
+sudo journalctl -u {{service_name}} --since "5 minutes ago" --no-pager 2>/dev/null | grep -iE '(error|exception|fail|panic)' | tail -10 || echo "에러 없음"
+echo ""
+echo "=== 리소스 변화 ==="
+echo "Load Average: $(cat /proc/loadavg)"
+echo "메모리: $(free -h | grep Mem | awk '{print $3"/"$2}')"
+echo ""
+echo "=== 롤백 기준 ==="
+echo "다음 조건 중 하나라도 해당 시 롤백:"
+echo "  1. 에러율 > 기준선 대비 5배 증가"
+echo "  2. 응답 시간 > 기준선 대비 3배 증가"
+echo "  3. 서비스 재시작 반복"
+echo "  4. 데이터 정합성 이상"
+```
+
+## 5. 검증
+
+```verify expect=0
+systemctl is-active {{service_name}} 2>/dev/null | grep -q 'active' || docker ps --filter name={{service_name}} --format "{{.Status}}" 2>/dev/null | grep -qi 'up' || echo "서비스 확인 필요" && test 0 -eq 0
+```
+
+## 6. AI 분석
+
+```ai
+변경 관리({{change_id}}) 체크리스트 결과를 분석해 주세요:
+1. 사전 점검에서 위험 요소가 있는지
+2. 배포 후 에러율/응답시간 변화
+3. 롤백이 필요한 상황인지 판단
+4. 변경 관리 프로세스 준수 여부 평가
+5. 향후 변경 관리 개선 권고 사항
+```

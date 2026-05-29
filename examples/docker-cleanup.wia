@@ -1,0 +1,98 @@
+---
+wia: "1"
+title: Docker 미사용 리소스 정리
+agent: soomy
+inputs:
+  dry_run: { type: string, default: "false" }
+---
+
+# Docker 미사용 리소스 정리
+
+## 1. 현재 디스크 사용량 확인
+
+```sh run
+echo "=== Docker Disk Usage ==="
+docker system df
+echo ""
+echo "=== Host Disk Usage ==="
+df -h /var/lib/docker 2>/dev/null || df -h /
+```
+
+## 2. 중지된 컨테이너 목록 확인
+
+```sh run
+FMT='{{.ID}} {{.Names}} {{.Status}}'
+STOPPED=$(docker ps -a --filter "status=exited" --filter "status=dead" --format "$FMT" 2>/dev/null)
+if [ -z "$STOPPED" ]; then
+  echo "No stopped containers found"
+else
+  echo "=== Stopped Containers ==="
+  echo "$STOPPED"
+  echo "Count: $(echo "$STOPPED" | wc -l)"
+fi
+```
+
+## 3. 댕글링 이미지 확인
+
+```sh run
+FMT='{{.ID}} {{.Repository}}:{{.Tag}} {{.Size}}'
+DANGLING=$(docker images --filter "dangling=true" --format "$FMT" 2>/dev/null)
+if [ -z "$DANGLING" ]; then
+  echo "No dangling images found"
+else
+  echo "=== Dangling Images ==="
+  echo "$DANGLING"
+  echo "Count: $(echo "$DANGLING" | wc -l)"
+fi
+```
+
+## 4. 미사용 볼륨 확인
+
+```sh run
+FMT='{{.Name}}'
+VOLUMES=$(docker volume ls --filter "dangling=true" --format "$FMT" 2>/dev/null)
+if [ -z "$VOLUMES" ]; then
+  echo "No unused volumes found"
+else
+  echo "=== Unused Volumes ==="
+  echo "$VOLUMES"
+  echo "Count: $(echo "$VOLUMES" | wc -l)"
+fi
+```
+
+## 5. 리소스 정리 실행
+
+```sh run
+if [ "{{dry_run}}" = "true" ]; then
+  echo "DRY RUN MODE - No changes will be made"
+  echo "Would remove: stopped containers, unused networks, dangling images, build cache"
+  exit 0
+fi
+echo "=== Removing stopped containers ==="
+docker container prune -f
+echo ""
+echo "=== Removing dangling images ==="
+docker image prune -f
+echo ""
+echo "=== Removing unused networks ==="
+docker network prune -f
+echo ""
+echo "=== Removing build cache ==="
+docker builder prune -f --keep-storage=2GB
+```
+
+## 6. 정리 후 디스크 사용량 검증
+
+```verify expect=0
+docker system df
+```
+
+## 7. AI 분석
+
+```ai
+Docker 리소스 정리 결과를 분석해 주세요:
+1. 정리 전후 디스크 사용량 변화
+2. 제거된 리소스 요약 (컨테이너, 이미지, 네트워크, 캐시)
+3. 아직 남아 있는 미사용 리소스가 있는지
+4. 정기적 정리를 위한 cron 설정 권장 사항
+```

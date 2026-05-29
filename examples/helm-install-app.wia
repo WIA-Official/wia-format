@@ -1,0 +1,60 @@
+---
+wia: "1"
+title: Helm 차트로 앱 설치
+agent: soomy
+inputs:
+  release_name: { type: string, default: "my-release" }
+  chart: { type: string, default: "bitnami/nginx" }
+  namespace: { type: string, default: "default" }
+---
+
+# Helm 차트로 앱 설치
+
+## 1. Helm 설치 확인
+
+```sh run
+helm version --short 2>/dev/null || {
+  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  helm version --short
+}
+```
+
+## 2. 차트 저장소 업데이트
+
+```sh run
+helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
+helm repo update
+```
+
+## 3. 네임스페이스 생성
+
+```sh run
+kubectl create ns {{namespace}} 2>/dev/null || echo "네임스페이스 {{namespace}} 이미 존재"
+```
+
+## 4. Helm 차트 설치
+
+```sh run
+helm upgrade --install {{release_name}} {{chart}} \
+  --namespace {{namespace}} \
+  --wait --timeout 300s
+```
+
+## 5. 설치 결과 확인
+
+```sh run
+helm status {{release_name}} -n {{namespace}}
+kubectl get all -n {{namespace}} -l app.kubernetes.io/instance={{release_name}}
+```
+
+## 6. 검증
+
+```verify expect=0
+helm status {{release_name}} -n {{namespace}} --output json | grep -q '"status":"deployed"' && echo 0 || echo 1
+```
+
+## 7. AI 분석
+
+```ai
+Helm 릴리스 {{release_name}}의 설치 결과를 분석해 주세요. 배포된 리소스 목록, Pod 상태, 서비스 노출 방식을 확인하고, 보안 및 리소스 설정 권고 사항을 제안해 주세요.
+```

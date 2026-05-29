@@ -1,0 +1,54 @@
+---
+wia: "1"
+title: GitHub Actions 셀프호스트 러너 설치
+agent: soomy
+inputs:
+  repo_url: { type: string, default: "https://github.com/org/repo" }
+  token: { type: secret, default: "" }
+---
+
+# GitHub Actions 셀프호스트 러너 설치
+
+## 1. 러너 디렉토리 생성
+
+```sh run
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -s https://api.github.com/repos/actions/runner/releases/latest | grep -oP '"tag_name": "v\K[^"]+' | head -1
+```
+
+## 2. 러너 다운로드 및 설치
+
+```sh run
+cd ~/actions-runner
+LATEST=$(curl -s https://api.github.com/repos/actions/runner/releases/latest | grep -oP '"tag_name": "v\K[^"]+' | head -1)
+curl -o actions-runner-linux-x64.tar.gz -L "https://github.com/actions/runner/releases/download/v${LATEST}/actions-runner-linux-x64-${LATEST}.tar.gz"
+tar xzf actions-runner-linux-x64.tar.gz
+```
+
+## 3. 러너 등록
+
+```sh run
+cd ~/actions-runner
+./config.sh --url {{repo_url}} --token {{token}} --unattended --name "$(hostname)" --labels "self-hosted,linux,x64"
+```
+
+## 4. 서비스 등록 및 시작
+
+```sh run
+cd ~/actions-runner
+sudo ./svc.sh install
+sudo ./svc.sh start
+sudo ./svc.sh status
+```
+
+## 5. 검증
+
+```verify expect=0
+cd ~/actions-runner && sudo ./svc.sh status | grep -q "active (running)" && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+GitHub Actions 셀프호스트 러너 설치 결과를 분석해 주세요. 러너 등록 상태, 서비스 실행 상태를 확인하고, 보안(토큰 관리, 네트워크 격리)과 운영(자동 업데이트, 모니터링) 권고 사항을 제안해 주세요.
+```

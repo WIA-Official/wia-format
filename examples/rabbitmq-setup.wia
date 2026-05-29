@@ -1,0 +1,100 @@
+---
+wia: "1"
+title: RabbitMQ 설치 및 큐 관리
+agent: soomy
+inputs:
+  admin_user: { type: string, default: "admin" }
+  admin_pass: { type: secret }
+  vhost: { type: string, default: "/" }
+---
+
+# RabbitMQ 설치 및 큐 관리
+
+## 1. Erlang 및 RabbitMQ 설치
+
+```sh run
+echo "=== Erlang 설치 ==="
+sudo dnf install -y erlang 2>/dev/null || sudo yum install -y erlang 2>/dev/null || echo "Erlang 수동 설치 필요"
+echo ""
+echo "=== RabbitMQ 설치 ==="
+sudo dnf install -y rabbitmq-server 2>/dev/null || sudo yum install -y rabbitmq-server 2>/dev/null || echo "RabbitMQ 수동 설치 필요"
+sudo systemctl enable --now rabbitmq-server
+rabbitmqctl version 2>/dev/null || echo "RabbitMQ 버전 확인 실패"
+```
+
+## 2. 관리 플러그인 활성화 및 관리자 계정 생성
+
+```sh run
+sudo rabbitmq-plugins enable rabbitmq_management
+sudo rabbitmq-plugins enable rabbitmq_shovel rabbitmq_shovel_management 2>/dev/null
+echo ""
+echo "=== 관리자 계정 생성 ==="
+sudo rabbitmqctl add_user {{admin_user}} "{{admin_pass}}" 2>/dev/null || sudo rabbitmqctl change_password {{admin_user}} "{{admin_pass}}"
+sudo rabbitmqctl set_user_tags {{admin_user}} administrator
+sudo rabbitmqctl set_permissions -p "{{vhost}}" {{admin_user}} ".*" ".*" ".*"
+echo ""
+echo "=== 기본 guest 계정 제거 ==="
+sudo rabbitmqctl delete_user guest 2>/dev/null || echo "guest 이미 제거됨"
+echo "관리 콘솔: http://localhost:15672"
+```
+
+## 3. VHost 및 큐 설정
+
+```sh run
+echo "=== VHost 설정 ==="
+if [ "{{vhost}}" != "/" ]; then
+  sudo rabbitmqctl add_vhost "{{vhost}}" 2>/dev/null || echo "VHost 이미 존재"
+  sudo rabbitmqctl set_permissions -p "{{vhost}}" {{admin_user}} ".*" ".*" ".*"
+fi
+echo ""
+echo "=== 기본 큐 및 익스체인지 생성 ==="
+sudo rabbitmqadmin -u {{admin_user}} -p "{{admin_pass}}" -V "{{vhost}}" declare exchange name=events type=topic durable=true 2>/dev/null || echo "rabbitmqadmin 미설치"
+sudo rabbitmqadmin -u {{admin_user}} -p "{{admin_pass}}" -V "{{vhost}}" declare queue name=task_queue durable=true 2>/dev/null
+sudo rabbitmqadmin -u {{admin_user}} -p "{{admin_pass}}" -V "{{vhost}}" declare queue name=dead_letter durable=true 2>/dev/null
+echo "큐 설정 완료"
+```
+
+## 4. 클러스터 및 상태 확인
+
+```sh run
+echo "=== RabbitMQ 상태 ==="
+sudo rabbitmqctl status | grep -E "pid|uptime|memory|disk_free"
+echo ""
+echo "=== 리스너 ==="
+sudo rabbitmqctl listeners
+echo ""
+echo "=== 큐 목록 ==="
+sudo rabbitmqctl list_queues -p "{{vhost}}" name messages consumers 2>/dev/null
+echo ""
+echo "=== 익스체인지 목록 ==="
+sudo rabbitmqctl list_exchanges -p "{{vhost}}" name type 2>/dev/null
+```
+
+## 5. 메시지 전송/수신 테스트
+
+```sh run
+echo "=== 테스트 메시지 발행 ==="
+sudo rabbitmqadmin -u {{admin_user}} -p "{{admin_pass}}" -V "{{vhost}}" publish exchange=amq.default routing_key=task_queue payload='{"test": "hello from runbook"}' 2>/dev/null || echo "rabbitmqadmin 미설치 - 수동 테스트 필요"
+echo ""
+echo "=== 큐 메시지 수 확인 ==="
+sudo rabbitmqctl list_queues -p "{{vhost}}" name messages 2>/dev/null
+```
+
+## 6. 검증
+
+```verify expect=0
+sudo systemctl is-active rabbitmq-server
+sudo rabbitmqctl authenticate_user {{admin_user}} "{{admin_pass}}" 2>/dev/null && echo "인증 성공" || echo "인증 실패"
+sudo rabbitmqctl list_queues -p "{{vhost}}" name 2>/dev/null | grep -q "task_queue" && echo "큐 존재 확인" || echo "큐 미생성"
+```
+
+## 7. AI 분석
+
+```ai
+RabbitMQ 설치 및 설정 결과를 분석해 주세요:
+- 서비스 상태 및 메모리/디스크 사용량 적정성
+- VHost "{{vhost}}" 권한 설정의 보안성
+- Dead Letter Queue 설정 필요성 및 권장 구성
+- 클러스터링 (미러링/쿼럼 큐) 구성 필요성
+- 모니터링 및 알림 설정 (큐 깊이, 소비자 수, 메모리) 권장사항
+```

@@ -1,0 +1,76 @@
+---
+wia: "1"
+title: DNS 설정 및 문제 진단
+agent: soomy
+inputs:
+  domain: { type: string, default: "example.com" }
+---
+
+# DNS 설정 및 문제 진단
+
+## 1. DNS 레코드 조회
+
+```sh run
+echo "=== A 레코드 ===" && dig +short A {{domain}}
+echo "=== AAAA 레코드 ===" && dig +short AAAA {{domain}}
+echo "=== MX 레코드 ===" && dig +short MX {{domain}}
+echo "=== CNAME 레코드 ===" && dig +short CNAME {{domain}}
+echo "=== NS 레코드 ===" && dig +short NS {{domain}}
+echo "=== TXT 레코드 ===" && dig +short TXT {{domain}}
+```
+
+## 2. 네임서버 체인 추적
+
+```sh run
+dig +trace {{domain}} | tail -30
+```
+
+## 3. 역방향 DNS 조회
+
+```sh run
+IP=$(dig +short A {{domain}} | head -1)
+echo "정방향 IP: $IP"
+if [ -n "$IP" ]; then
+  echo "역방향 PTR:" && dig +short -x "$IP"
+fi
+```
+
+## 4. nslookup 교차 검증
+
+```sh run
+echo "=== 시스템 기본 DNS ===" && nslookup {{domain}}
+echo ""
+echo "=== Google DNS (8.8.8.8) ===" && nslookup {{domain}} 8.8.8.8
+echo ""
+echo "=== Cloudflare DNS (1.1.1.1) ===" && nslookup {{domain}} 1.1.1.1
+```
+
+## 5. DNS 전파 및 TTL 확인
+
+```sh run
+echo "=== 상세 응답 (TTL 포함) ==="
+dig {{domain}} +noall +answer
+echo ""
+echo "=== SOA 레코드 ==="
+dig SOA {{domain}} +noall +answer
+echo ""
+echo "=== 로컬 resolv.conf ==="
+cat /etc/resolv.conf | grep -v '^#'
+```
+
+## 6. 검증
+
+```verify expect=0
+dig +short A {{domain}} | head -1 | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+```
+
+## 7. AI 분석
+
+```ai
+위 DNS 진단 결과를 분석하여 다음을 확인해 주세요:
+1. DNS 레코드가 올바르게 설정되어 있는지
+2. 네임서버 체인에 문제가 없는지
+3. 여러 DNS 서버 간 응답 불일치가 있는지
+4. TTL 값이 적절한지
+5. 발견된 문제에 대한 해결 방안 제시
+```

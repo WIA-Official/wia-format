@@ -1,0 +1,106 @@
+---
+wia: "1"
+title: 프라이빗 Docker 레지스트리 설정
+agent: soomy
+inputs:
+  registry_domain: { type: string }
+  registry_port: { type: string, default: "5000" }
+---
+
+# 프라이빗 Docker 레지스트리 설정
+
+## 1. 사전 요구사항 확인
+
+```verify expect=0
+docker --version && docker compose version
+```
+
+## 2. 레지스트리 데이터 디렉토리 생성
+
+```sh run
+sudo mkdir -p /opt/docker-registry/data
+sudo mkdir -p /opt/docker-registry/auth
+sudo mkdir -p /opt/docker-registry/certs
+echo "Registry directories created at /opt/docker-registry/"
+ls -la /opt/docker-registry/
+```
+
+## 3. 기본 인증(htpasswd) 설정
+
+```sh run
+if ! command -v htpasswd &>/dev/null; then
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get install -y apache2-utils
+  else
+    sudo yum install -y httpd-tools
+  fi
+fi
+htpasswd -Bbn admin "$(openssl rand -base64 16)" > /opt/docker-registry/auth/htpasswd
+echo "Basic auth configured. Credentials saved to /opt/docker-registry/auth/htpasswd"
+echo "Username: admin"
+echo "Password is in the htpasswd file (bcrypt hashed)"
+```
+
+## 4. 자체 서명 인증서 생성
+
+```sh run
+openssl req -newkey rsa:4096 -nodes \
+  -sha256 -x509 -days 365 \
+  -keyout /opt/docker-registry/certs/registry.key \
+  -out /opt/docker-registry/certs/registry.crt \
+  -subj "/CN={{registry_domain}}" \
+  -addext "subjectAltName=DNS:{{registry_domain}}"
+echo "TLS certificate generated for {{registry_domain}}"
+```
+
+## 5. Docker Compose 파일 생성 및 레지스트리 기동
+
+```sh run
+cat > /opt/docker-registry/docker-compose.yml <<'COMPOSE'
+services:
+  registry:
+    image: registry:2
+    restart: always
+    ports:
+      - "{{registry_port}}:5000"
+    environment:
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: "Private Docker Registry"
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+      REGISTRY_HTTP_TLS_CERTIFICATE: /certs/registry.crt
+      REGISTRY_HTTP_TLS_KEY: /certs/registry.key
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - /opt/docker-registry/data:/var/lib/registry
+      - /opt/docker-registry/auth:/auth
+      - /opt/docker-registry/certs:/certs
+COMPOSE
+
+cd /opt/docker-registry && docker compose up -d
+```
+
+## 6. 클라이언트 인증서 신뢰 설정
+
+```sh run
+sudo mkdir -p /etc/docker/certs.d/{{registry_domain}}:{{registry_port}}
+sudo cp /opt/docker-registry/certs/registry.crt /etc/docker/certs.d/{{registry_domain}}:{{registry_port}}/ca.crt
+echo "Certificate trusted for {{registry_domain}}:{{registry_port}}"
+```
+
+## 7. 레지스트리 동작 검증
+
+```verify expect=0
+sleep 3
+curl -k --silent --output /dev/null --write-out "%{http_code}" https://localhost:{{registry_port}}/v2/ | grep -q "401" && echo "Registry is running (auth enabled)" && exit 0 || exit 1
+```
+
+## 8. AI 분석
+
+```ai
+프라이빗 Docker 레지스트리 설정 결과를 분석해 주세요:
+1. 레지스트리가 {{registry_domain}}:{{registry_port}}에서 정상 동작하는지
+2. TLS 인증서와 Basic Auth가 올바르게 적용되었는지
+3. 클라이언트에서 docker login {{registry_domain}}:{{registry_port}} 명령으로 접근 가능한지
+4. 프로덕션 환경에서 추가로 적용해야 할 보안 설정 (Let's Encrypt 전환, 방화벽 규칙 등)
+5. 이미지 Push/Pull 테스트 명령어 예시
+```

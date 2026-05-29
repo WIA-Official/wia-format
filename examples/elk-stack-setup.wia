@@ -1,0 +1,108 @@
+---
+wia: "1"
+title: ELK 스택 설치 (Elasticsearch + Logstash + Kibana)
+agent: soomy
+inputs:
+  es_port: { type: string, default: "9200" }
+  kibana_port: { type: string, default: "5601" }
+---
+
+# ELK 스택 설치 (Elasticsearch + Logstash + Kibana)
+
+## 1. Elasticsearch GPG 키 및 저장소 추가
+
+```sh run
+sudo rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+cat <<'REPO' | sudo tee /etc/yum.repos.d/elasticsearch.repo
+[elasticsearch-8.x]
+name=Elasticsearch repository for 8.x packages
+baseurl=https://artifacts.elastic.co/packages/8.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=1
+autorefresh=1
+type=rpm-md
+REPO
+```
+
+## 2. Elasticsearch 설치 및 설정
+
+```sh run
+sudo dnf install -y elasticsearch
+sudo sed -i 's/#network.host: .*/network.host: 127.0.0.1/' /etc/elasticsearch/elasticsearch.yml
+sudo sed -i 's/#http.port: .*/http.port: {{es_port}}/' /etc/elasticsearch/elasticsearch.yml
+sudo sed -i 's/xpack.security.enabled: true/xpack.security.enabled: false/' /etc/elasticsearch/elasticsearch.yml
+sudo systemctl enable --now elasticsearch
+sleep 5
+curl -s http://localhost:{{es_port}}/_cluster/health?pretty
+```
+
+## 3. Logstash 설치 및 기본 파이프라인 구성
+
+```sh run
+sudo dnf install -y logstash
+cat <<'PIPELINE' | sudo tee /etc/logstash/conf.d/syslog.conf
+input {
+  file {
+    path => "/var/log/syslog"
+    start_position => "beginning"
+    type => "syslog"
+  }
+}
+filter {
+  grok {
+    match => { "message" => "%{SYSLOGTIMESTAMP:syslog_timestamp} %{SYSLOGHOST:syslog_hostname} %{DATA:syslog_program}(?:\[%{POSINT:syslog_pid}\])?: %{GREEDYDATA:syslog_message}" }
+  }
+  date {
+    match => [ "syslog_timestamp", "MMM  d HH:mm:ss", "MMM dd HH:mm:ss" ]
+  }
+}
+output {
+  elasticsearch {
+    hosts => ["http://localhost:{{es_port}}"]
+    index => "syslog-%{+YYYY.MM.dd}"
+  }
+}
+PIPELINE
+sudo systemctl enable --now logstash
+```
+
+## 4. Kibana 설치 및 설정
+
+```sh run
+sudo dnf install -y kibana
+sudo sed -i 's/#server.port: .*/server.port: {{kibana_port}}/' /etc/kibana/kibana.yml
+sudo sed -i 's/#server.host: .*/server.host: "0.0.0.0"/' /etc/kibana/kibana.yml
+sudo sed -i 's|#elasticsearch.hosts: .*|elasticsearch.hosts: ["http://localhost:{{es_port}}"]|' /etc/kibana/kibana.yml
+sudo systemctl enable --now kibana
+echo "Kibana 시작 중... 포트 {{kibana_port}}"
+```
+
+## 5. 서비스 상태 확인
+
+```verify expect=0
+curl -sf http://localhost:{{es_port}}/_cluster/health | python3 -m json.tool
+systemctl is-active elasticsearch
+systemctl is-active logstash
+systemctl is-active kibana
+```
+
+## 6. 인덱스 패턴 확인
+
+```sh run
+sleep 10
+curl -s http://localhost:{{es_port}}/_cat/indices?v
+curl -s http://localhost:{{es_port}}/_cat/health?v
+curl -s http://localhost:{{es_port}}/_cat/nodes?v
+```
+
+## 7. AI 분석
+
+```ai
+ELK 스택 설치 결과를 분석해 주세요:
+- Elasticsearch (포트 {{es_port}}) 클러스터 헬스 상태
+- Logstash 파이프라인 구성의 적절성
+- Kibana (포트 {{kibana_port}}) 접근성 및 보안 설정
+- 프로덕션 환경을 위한 JVM 힙 사이즈 및 보안 권장사항
+- 인덱스 라이프사이클 관리(ILM) 정책 추가 필요성
+```

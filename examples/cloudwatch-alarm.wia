@@ -1,0 +1,68 @@
+---
+wia: "1"
+title: CloudWatch 알람 설정
+agent: soomy
+inputs:
+  instance_id: { type: string, default: "i-0123456789abcdef0" }
+  alarm_name: { type: string, default: "high-cpu-alarm" }
+  threshold: { type: string, default: "80" }
+---
+
+# CloudWatch 알람 설정
+
+## 1. 인스턴스 상태 확인
+
+```sh run
+aws ec2 describe-instances --instance-ids {{instance_id}} \
+  --query 'Reservations[0].Instances[0].[InstanceId,State.Name,InstanceType]' --output table
+```
+
+## 2. 현재 메트릭 확인
+
+```sh run
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/EC2 \
+  --metric-name CPUUtilization \
+  --dimensions Name=InstanceId,Value={{instance_id}} \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Average Maximum \
+  --output table
+```
+
+## 3. CPU 알람 생성
+
+```sh run
+aws cloudwatch put-metric-alarm \
+  --alarm-name "{{alarm_name}}" \
+  --alarm-description "CPU utilization exceeds {{threshold}}% for {{instance_id}}" \
+  --namespace AWS/EC2 \
+  --metric-name CPUUtilization \
+  --dimensions Name=InstanceId,Value={{instance_id}} \
+  --statistic Average \
+  --period 300 \
+  --threshold {{threshold}} \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 2 \
+  --treat-missing-data missing
+```
+
+## 4. 알람 상태 확인
+
+```sh run
+aws cloudwatch describe-alarms --alarm-names "{{alarm_name}}" \
+  --query 'MetricAlarms[0].[AlarmName,StateValue,MetricName,Threshold]' --output table
+```
+
+## 5. 검증
+
+```verify expect=0
+aws cloudwatch describe-alarms --alarm-names "{{alarm_name}}" --query 'MetricAlarms[0].StateValue' --output text | grep -qE "OK|INSUFFICIENT_DATA" && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+CloudWatch 알람 {{alarm_name}} 설정을 분석해 주세요. 임계값({{threshold}}%), 평가 기간, 통계 방식이 적절한지 검토하고, SNS 토픽 연동, 복합 알람, Auto Scaling 액션 연결 등 운영 개선 방안을 제안해 주세요.
+```

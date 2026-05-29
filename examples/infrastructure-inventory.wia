@@ -1,0 +1,108 @@
+---
+wia: "1"
+title: 인프라 인벤토리 문서화 (서버, IP, 서비스, 포트, 소유자)
+agent: soomy
+inputs: {}
+---
+
+# 인프라 인벤토리 문서화 (서버, IP, 서비스, 포트, 소유자)
+
+## 1. 로컬 서버 기본 정보 수집
+
+```sh run
+echo "=== 호스트 정보 ==="
+echo "호스트명: $(hostname)"
+echo "OS: $(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '"')"
+echo "커널: $(uname -r)"
+echo "아키텍처: $(uname -m)"
+echo "업타임: $(uptime -p 2>/dev/null || uptime)"
+echo "CPU: $(nproc) 코어"
+echo "메모리: $(free -h | awk '/^Mem:/{print $2}')"
+echo "디스크:"
+df -h --output=source,size,used,avail,pcent,target | grep -E "^/dev"
+```
+
+## 2. 네트워크 인터페이스 및 IP 주소
+
+```sh run
+echo "=== 네트워크 인터페이스 ==="
+ip -4 addr show | grep -E "^[0-9]|inet " | sed 's/^/  /'
+echo ""
+echo "=== 공인 IP ==="
+curl -sf https://checkip.amazonaws.com 2>/dev/null || curl -sf https://ifconfig.me 2>/dev/null || echo "공인 IP 확인 불가"
+echo ""
+echo "=== 기본 게이트웨이 ==="
+ip route show default
+echo ""
+echo "=== DNS 설정 ==="
+cat /etc/resolv.conf | grep -v "^#"
+```
+
+## 3. 리스닝 서비스 및 포트 목록
+
+```sh run
+echo "=== 리스닝 포트 (TCP) ==="
+sudo ss -tlnp | awk 'NR>1{print $4, $6}' | sort -t: -k2 -n
+echo ""
+echo "=== 리스닝 포트 (UDP) ==="
+sudo ss -ulnp | awk 'NR>1{print $4, $6}' | sort -t: -k2 -n
+echo ""
+echo "=== systemd 활성 서비스 ==="
+systemctl list-units --type=service --state=running --no-pager | grep -v "^$" | head -30
+```
+
+## 4. 설치된 주요 소프트웨어 버전
+
+```sh run
+echo "=== 주요 소프트웨어 버전 ==="
+for cmd in nginx apache2 httpd node npm python3 python java docker podman kubectl helm terraform ansible git mysql postgres redis-server mongod rabbitmqctl php go rustc; do
+  if command -v $cmd &>/dev/null; then
+    VER=$($cmd --version 2>&1 | head -1)
+    printf "  %-15s : %s\n" "$cmd" "$VER"
+  fi
+done
+echo ""
+echo "=== Docker 컨테이너 (실행 중) ==="
+FMT='{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+docker ps --format "table $FMT" 2>/dev/null || echo "Docker 미설치 또는 미실행"
+```
+
+## 5. 크론잡 및 예약 작업
+
+```sh run
+echo "=== 현재 사용자 크론탭 ==="
+crontab -l 2>/dev/null || echo "크론탭 없음"
+echo ""
+echo "=== 시스템 크론 ==="
+ls /etc/cron.d/ 2>/dev/null
+echo ""
+echo "=== systemd 타이머 ==="
+systemctl list-timers --no-pager | head -15
+```
+
+## 6. 검증
+
+```verify expect=0
+echo "=== 인벤토리 수집 검증 ==="
+HOSTNAME=$(hostname)
+test -n "$HOSTNAME" && echo "호스트명 수집 완료: $HOSTNAME" || echo "호스트명 수집 실패"
+IP_COUNT=$(ip -4 addr show | grep -c "inet ")
+echo "IP 주소 수집: ${IP_COUNT}개"
+PORT_COUNT=$(sudo ss -tlnp | tail -n +2 | wc -l)
+echo "리스닝 포트: ${PORT_COUNT}개"
+SERVICE_COUNT=$(systemctl list-units --type=service --state=running --no-pager | grep -c "\.service")
+echo "활성 서비스: ${SERVICE_COUNT}개"
+echo "인벤토리 수집 완료"
+```
+
+## 7. AI 분석
+
+```ai
+수집된 인프라 인벤토리를 종합 분석해 주세요:
+- 서버 리소스 (CPU, 메모리, 디스크) 용량 적정성
+- 리스닝 포트 중 불필요하거나 보안 위험이 있는 서비스
+- 설치된 소프트웨어 버전의 EOL/보안 패치 상태
+- 크론잡의 적절성 및 누락된 유지보수 작업
+- 인벤토리 관리 자동화 (Ansible facts, AWS SSM 등) 도입 권장
+- CMDB 또는 자산 관리 시스템 연동 방안
+```

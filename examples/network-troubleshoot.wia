@@ -1,0 +1,69 @@
+---
+wia: "1"
+title: 네트워크 연결 문제 진단
+agent: soomy
+inputs:
+  target_host: { type: string }
+---
+
+# 네트워크 연결 문제 진단
+
+## 1. 기본 연결 확인 (ping)
+
+```sh run
+ping -c 5 -W 3 {{target_host}}
+```
+
+## 2. 경로 추적 (traceroute)
+
+```sh run
+traceroute -w 3 -m 20 {{target_host}} 2>/dev/null || tracepath {{target_host}} 2>/dev/null
+```
+
+## 3. DNS 확인
+
+```sh run
+dig {{target_host}} +short && echo "---" && dig {{target_host}} +trace 2>/dev/null | tail -10
+echo "=== /etc/resolv.conf ==="
+cat /etc/resolv.conf
+```
+
+## 4. 포트 연결 테스트
+
+```sh run
+for port in 22 80 443; do
+  timeout 3 bash -c "echo >/dev/tcp/{{target_host}}/$port" 2>/dev/null && echo "PORT $port: OPEN" || echo "PORT $port: CLOSED/FILTERED"
+done
+```
+
+## 5. 로컬 네트워크 상태 확인
+
+```sh run
+ss -tunap | head -30
+echo "=== 라우팅 테이블 ==="
+ip route show
+echo "=== 인터페이스 ==="
+ip addr show | grep -E "^[0-9]|inet "
+```
+
+## 6. HTTP 응답 테스트
+
+```sh run
+curl -sI -o /dev/null -w "HTTP_CODE: %{http_code}\nTIME_CONNECT: %{time_connect}s\nTIME_TOTAL: %{time_total}s\nREMOTE_IP: %{remote_ip}\n" --connect-timeout 10 https://{{target_host}} 2>/dev/null || echo "HTTPS 연결 실패, HTTP 시도..."
+curl -sI -o /dev/null -w "HTTP_CODE: %{http_code}\nTIME_CONNECT: %{time_connect}s\nTIME_TOTAL: %{time_total}s\n" --connect-timeout 10 http://{{target_host}} 2>/dev/null || echo "HTTP 연결도 실패"
+```
+
+## 7. 검증
+
+```verify expect=0
+ping -c 1 -W 5 {{target_host}} > /dev/null 2>&1 && exit 0 || exit 1
+```
+
+## 8. AI 분석
+
+```ai
+ping 결과, traceroute 경로, DNS 응답, 포트 상태, HTTP 응답을 종합 분석하여:
+1. 네트워크 문제의 위치 (로컬, 중간 홉, 대상 서버, DNS)를 특정하라
+2. 방화벽/보안그룹 차단 여부를 판단하라
+3. 구체적인 해결 방안 (SG 규칙 추가, DNS 변경, 라우팅 수정 등)을 제시하라
+```

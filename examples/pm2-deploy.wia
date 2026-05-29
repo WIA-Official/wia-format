@@ -1,0 +1,70 @@
+---
+wia: "1"
+title: PM2로 Node.js 앱 배포 및 관리
+agent: soomy
+inputs:
+  app_name: { type: string, default: "my-app" }
+  app_path: { type: string, default: "/var/www/my-app" }
+---
+
+# PM2로 Node.js 앱 배포 및 관리
+
+## 1. Node.js 및 PM2 설치 확인
+
+```sh run
+node --version 2>/dev/null || {
+  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+  sudo dnf install -y nodejs 2>/dev/null || sudo yum install -y nodejs
+}
+npm list -g pm2 2>/dev/null || sudo npm install -g pm2
+pm2 --version
+```
+
+## 2. 앱 의존성 설치
+
+```sh run
+cd {{app_path}}
+echo "=== 앱 디렉토리 ==="
+ls -la
+echo ""
+npm install --production
+```
+
+## 3. PM2로 앱 시작
+
+```sh run
+cd {{app_path}}
+pm2 delete {{app_name}} 2>/dev/null || true
+pm2 start npm --name "{{app_name}}" -- start \
+  --max-memory-restart 512M \
+  --exp-backoff-restart-delay=100
+pm2 save
+```
+
+## 4. PM2 시작 스크립트 등록
+
+```sh run
+pm2 startup systemd -u ec2-user --hp /home/ec2-user 2>&1 | tail -1 | bash 2>/dev/null || echo "startup 이미 설정됨"
+pm2 save
+```
+
+## 5. 상태 확인
+
+```sh run
+pm2 status
+echo ""
+echo "=== 최근 로그 ==="
+pm2 logs {{app_name}} --lines 10 --nostream
+```
+
+## 6. 검증
+
+```verify expect=0
+pm2 jlist | python3 -c "import sys,json; apps=json.load(sys.stdin); print(0 if any(a['name']=='{{app_name}}' and a['pm2_env']['status']=='online' for a in apps) else 1)"
+```
+
+## 7. AI 분석
+
+```ai
+PM2 앱 {{app_name}} 배포 결과를 분석해 주세요. 프로세스 상태, 메모리 사용량, 재시작 횟수를 확인하고, 클러스터 모드, 로그 로테이션(pm2-logrotate), 모니터링(pm2 monit) 설정을 제안해 주세요.
+```

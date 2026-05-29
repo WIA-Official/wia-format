@@ -1,0 +1,97 @@
+---
+wia: "1"
+title: SSH 키 감사 및 미사용 키 정리
+agent: soomy
+inputs:
+  days_unused: { type: string, default: "90" }
+---
+
+# SSH 키 감사 및 미사용 키 정리
+
+## 1. 모든 사용자의 authorized_keys 수집
+
+```sh run
+echo "=== SSH Authorized Keys Audit ==="
+for homedir in /home/* /root; do
+  keyfile="$homedir/.ssh/authorized_keys"
+  if [ -f "$keyfile" ]; then
+    user=$(basename "$homedir")
+    count=$(wc -l < "$keyfile")
+    echo "[$user] $keyfile: ${count}개 키"
+    awk '{print NR": "$0}' "$keyfile" | cut -c1-120
+    echo ""
+  fi
+done
+```
+
+## 2. SSH 키 파일 권한 감사
+
+```sh run
+echo "=== SSH 디렉토리 권한 점검 ==="
+for homedir in /home/* /root; do
+  sshdir="$homedir/.ssh"
+  if [ -d "$sshdir" ]; then
+    user=$(basename "$homedir")
+    echo "[$user]"
+    ls -la "$sshdir/" 2>/dev/null
+    echo ""
+  fi
+done
+```
+
+## 3. 최근 SSH 접속 기록 확인
+
+```sh run
+echo "=== 최근 SSH 접속 기록 ({{days_unused}}일) ==="
+last -i | grep -v "reboot\|wtmp" | head -30
+echo ""
+echo "=== 현재 SSH 세션 ==="
+who
+```
+
+## 4. 잘못된 권한 자동 수정
+
+```sh run
+for homedir in /home/* /root; do
+  sshdir="$homedir/.ssh"
+  if [ -d "$sshdir" ]; then
+    user=$(basename "$homedir")
+    chmod 700 "$sshdir" 2>/dev/null
+    chmod 600 "$sshdir/authorized_keys" 2>/dev/null
+    chmod 600 "$sshdir"/id_* 2>/dev/null
+    chown -R "$user:$user" "$sshdir" 2>/dev/null || true
+    echo "[$user] 권한 수정 완료"
+  fi
+done
+```
+
+## 5. 검증
+
+```verify expect=0
+failed=0
+for homedir in /home/* /root; do
+  sshdir="$homedir/.ssh"
+  if [ -d "$sshdir" ]; then
+    perm=$(stat -c %a "$sshdir" 2>/dev/null)
+    if [ "$perm" != "700" ]; then
+      failed=1
+    fi
+  fi
+done
+exit $failed
+```
+
+## 6. root 직접 로그인 비활성화 확인
+
+```sh run
+echo "=== sshd_config 보안 설정 ==="
+grep -E "^(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication)" /etc/ssh/sshd_config 2>/dev/null || echo "기본 설정 사용 중"
+```
+
+## 7. AI 분석
+
+```ai
+SSH 키 감사 결과를 분석하세요.
+미사용 키, 불필요한 접근 권한, 약한 키 알고리즘(RSA 1024bit 등)을 식별하세요.
+sshd_config 설정이 보안 모범 사례에 부합하는지 평가하고 개선 사항을 제안해 주세요.
+```

@@ -1,0 +1,88 @@
+---
+wia: "1"
+title: 네트워크 대역폭 테스트
+agent: soomy
+inputs:
+  target_host: { type: string, default: "127.0.0.1" }
+---
+
+# 네트워크 대역폭 테스트
+
+## 1. 네트워크 인터페이스 현황
+
+```sh run
+echo "=== 인터페이스 목록 ==="
+ip -br addr show
+echo ""
+echo "=== 기본 라우팅 ==="
+ip route | head -5
+echo ""
+echo "=== 인터페이스 통계 ==="
+cat /proc/net/dev | column -t | head -10
+```
+
+## 2. 지연시간 및 경로 측정
+
+```sh run
+echo "=== Ping 테스트 (10회) ==="
+ping -c 10 -W 3 {{target_host}} 2>&1 | tail -5
+echo ""
+echo "=== MTR 경로 추적 ==="
+mtr -r -c 10 --no-dns {{target_host}} 2>/dev/null || traceroute -n -w 2 {{target_host}} 2>/dev/null | head -20
+```
+
+## 3. TCP 연결 성능 테스트
+
+```sh run
+echo "=== iperf3 클라이언트 모드 (10초) ==="
+iperf3 -c {{target_host}} -t 10 -P 4 2>&1 || echo "iperf3 연결 실패 — 대상 서버에서 'iperf3 -s' 실행 필요"
+```
+
+## 4. 대역폭 및 연결 품질 분석
+
+```sh run
+echo "=== TCP 연결 상태 ==="
+ss -s
+echo ""
+echo "=== 현재 대역폭 사용량 (5초 샘플) ==="
+if command -v sar &>/dev/null; then
+  sar -n DEV 1 5 | grep -v lo | tail -10
+elif command -v ifstat &>/dev/null; then
+  ifstat -t 1 5
+else
+  IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+  RX1=$(cat /sys/class/net/$IFACE/statistics/rx_bytes)
+  TX1=$(cat /sys/class/net/$IFACE/statistics/tx_bytes)
+  sleep 5
+  RX2=$(cat /sys/class/net/$IFACE/statistics/rx_bytes)
+  TX2=$(cat /sys/class/net/$IFACE/statistics/tx_bytes)
+  echo "$IFACE — RX: $(( (RX2 - RX1) / 5 / 1024 )) KB/s | TX: $(( (TX2 - TX1) / 5 / 1024 )) KB/s"
+fi
+```
+
+## 5. DNS 응답 속도
+
+```sh run
+echo "=== DNS 조회 시간 ==="
+for server in 8.8.8.8 1.1.1.1 $(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1); do
+  TIME=$(dig @$server google.com +noall +stats 2>/dev/null | grep "Query time" | awk '{print $4}')
+  echo "  $server: ${TIME}ms"
+done
+```
+
+## 6. 검증
+
+```verify expect=0
+ping -c 3 -W 5 {{target_host}} > /dev/null 2>&1
+```
+
+## 7. AI 분석
+
+```ai
+네트워크 대역폭 테스트 결과를 분석해 주세요:
+1. 지연시간(latency)이 정상 범위인지
+2. 패킷 손실률 평가
+3. 대역폭이 예상 수준에 부합하는지
+4. MTR/traceroute에서 병목 구간이 있는지
+5. 네트워크 성능 개선을 위한 권고 사항
+```

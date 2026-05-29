@@ -1,0 +1,115 @@
+---
+wia: "1"
+title: 리눅스 커널 성능 튜닝
+agent: soomy
+inputs:
+  max_connections: { type: string, default: "65535" }
+---
+
+# 리눅스 커널 성능 튜닝
+
+## 1. 현재 커널 파라미터 확인
+
+```sh run
+echo "=== 파일 디스크립터 ==="
+echo "현재 열린 FD: $(cat /proc/sys/fs/file-nr | awk '{print $1}')"
+echo "최대 FD: $(cat /proc/sys/fs/file-max)"
+echo "소프트 ulimit: $(ulimit -Sn)"
+echo "하드 ulimit: $(ulimit -Hn)"
+echo ""
+echo "=== TCP 스택 ==="
+echo "tcp_max_syn_backlog: $(sysctl -n net.ipv4.tcp_max_syn_backlog)"
+echo "somaxconn: $(sysctl -n net.core.somaxconn)"
+echo "tcp_tw_reuse: $(sysctl -n net.ipv4.tcp_tw_reuse)"
+echo "tcp_fin_timeout: $(sysctl -n net.ipv4.tcp_fin_timeout)"
+echo "tcp_keepalive_time: $(sysctl -n net.ipv4.tcp_keepalive_time)"
+echo ""
+echo "=== 메모리 ==="
+echo "vm.swappiness: $(sysctl -n vm.swappiness)"
+echo "vm.dirty_ratio: $(sysctl -n vm.dirty_ratio)"
+echo "vm.dirty_background_ratio: $(sysctl -n vm.dirty_background_ratio)"
+echo "vm.overcommit_memory: $(sysctl -n vm.overcommit_memory)"
+```
+
+## 2. 파일 디스크립터 및 ulimit 조정
+
+```sh run
+echo "=== fs.file-max 설정 ==="
+sudo sysctl -w fs.file-max={{max_connections}} 2>&1
+echo ""
+echo "=== /etc/security/limits.conf 현재 설정 ==="
+grep -v '^#' /etc/security/limits.conf | grep -v '^$' || echo "(비어 있음)"
+echo ""
+echo "--- 권장 추가 설정 ---"
+echo "* soft nofile {{max_connections}}"
+echo "* hard nofile {{max_connections}}"
+echo "* soft nproc 65535"
+echo "* hard nproc 65535"
+```
+
+## 3. TCP 스택 최적화
+
+```sh run
+echo "=== TCP 성능 튜닝 적용 ==="
+sudo sysctl -w net.core.somaxconn={{max_connections}} 2>&1
+sudo sysctl -w net.ipv4.tcp_max_syn_backlog={{max_connections}} 2>&1
+sudo sysctl -w net.ipv4.tcp_tw_reuse=1 2>&1
+sudo sysctl -w net.ipv4.tcp_fin_timeout=15 2>&1
+sudo sysctl -w net.ipv4.tcp_keepalive_time=600 2>&1
+sudo sysctl -w net.ipv4.tcp_keepalive_intvl=30 2>&1
+sudo sysctl -w net.ipv4.tcp_keepalive_probes=5 2>&1
+echo ""
+echo "=== 네트워크 버퍼 최적화 ==="
+sudo sysctl -w net.core.rmem_max=16777216 2>&1
+sudo sysctl -w net.core.wmem_max=16777216 2>&1
+sudo sysctl -w net.ipv4.tcp_rmem='4096 87380 16777216' 2>&1
+sudo sysctl -w net.ipv4.tcp_wmem='4096 65536 16777216' 2>&1
+```
+
+## 4. 메모리 및 I/O 튜닝
+
+```sh run
+echo "=== 메모리 튜닝 ==="
+sudo sysctl -w vm.swappiness=10 2>&1
+sudo sysctl -w vm.dirty_ratio=15 2>&1
+sudo sysctl -w vm.dirty_background_ratio=5 2>&1
+sudo sysctl -w vm.vfs_cache_pressure=50 2>&1
+echo ""
+echo "=== 현재 메모리 상태 ==="
+free -h
+echo ""
+echo "=== 스왑 상태 ==="
+swapon --show 2>/dev/null || echo "스왑 없음"
+```
+
+## 5. 적용 결과 확인
+
+```sh run
+echo "=== 변경된 주요 파라미터 ==="
+echo "fs.file-max = $(sysctl -n fs.file-max)"
+echo "net.core.somaxconn = $(sysctl -n net.core.somaxconn)"
+echo "net.ipv4.tcp_max_syn_backlog = $(sysctl -n net.ipv4.tcp_max_syn_backlog)"
+echo "net.ipv4.tcp_tw_reuse = $(sysctl -n net.ipv4.tcp_tw_reuse)"
+echo "net.ipv4.tcp_fin_timeout = $(sysctl -n net.ipv4.tcp_fin_timeout)"
+echo "vm.swappiness = $(sysctl -n vm.swappiness)"
+echo ""
+echo "참고: 영구 적용을 위해 /etc/sysctl.d/99-performance.conf 파일에 설정을 저장하세요."
+echo "명령: sudo sysctl -p /etc/sysctl.d/99-performance.conf"
+```
+
+## 6. 검증
+
+```verify expect=0
+test "$(sysctl -n net.core.somaxconn)" -ge 1024
+```
+
+## 7. AI 분석
+
+```ai
+리눅스 커널 성능 튜닝 결과를 분석해 주세요:
+1. 파일 디스크립터 설정이 워크로드에 적합한지
+2. TCP 스택 튜닝이 올바르게 적용되었는지
+3. 메모리/스왑 설정의 적절성
+4. 현재 서버 워크로드 대비 병목 가능성
+5. 추가 튜닝 권고 사항 및 영구 적용 방법
+```

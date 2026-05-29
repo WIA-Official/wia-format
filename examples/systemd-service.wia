@@ -1,0 +1,77 @@
+---
+wia: "1"
+title: systemd 서비스 파일 생성 및 등록
+agent: soomy
+inputs:
+  service_name: { type: string, default: "my-service" }
+  exec_start: { type: string, default: "/usr/local/bin/my-service" }
+  user: { type: string, default: "root" }
+---
+
+# systemd 서비스 파일 생성 및 등록
+
+## 1. 실행 파일 확인
+
+```sh run
+echo "=== 실행 파일 확인 ==="
+ls -la {{exec_start}} 2>/dev/null || echo "경고: {{exec_start}} 파일이 존재하지 않습니다"
+file {{exec_start}} 2>/dev/null || true
+echo ""
+echo "=== 사용자 확인 ==="
+id {{user}} 2>/dev/null || echo "경고: {{user}} 사용자가 존재하지 않습니다"
+```
+
+## 2. 서비스 유닛 파일 생성
+
+```sh run
+sudo tee /etc/systemd/system/{{service_name}}.service > /dev/null << EOF
+[Unit]
+Description={{service_name}} Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{user}}
+ExecStart={{exec_start}}
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier={{service_name}}
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+echo "서비스 파일 생성 완료: /etc/systemd/system/{{service_name}}.service"
+```
+
+## 3. 서비스 등록 및 시작
+
+```sh run
+sudo systemctl daemon-reload
+sudo systemctl enable {{service_name}}
+sudo systemctl start {{service_name}}
+```
+
+## 4. 상태 확인
+
+```sh run
+sudo systemctl status {{service_name}} --no-pager -l
+echo ""
+echo "=== 최근 로그 ==="
+sudo journalctl -u {{service_name}} --no-pager -n 20
+```
+
+## 5. 검증
+
+```verify expect=0
+systemctl is-active {{service_name}} | grep -q "active" && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+systemd 서비스 {{service_name}} 설정을 분석해 주세요. 유닛 파일 구성, 재시작 정책, 리소스 제한을 검토하고, 보안 강화(ProtectSystem, PrivateTmp, NoNewPrivileges), 의존성 관리, 로그 관리 개선 방안을 제안해 주세요.
+```

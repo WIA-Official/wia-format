@@ -10,7 +10,7 @@ agent:
 inputs:
   service_name:
     type: enum
-    of: [my-api, my-worker, my-frontend, my-backend]
+    of: [soom-api, soom-live, soomy-web, soom-web]
     description: "장애 서비스명"
   severity:
     type: enum
@@ -65,11 +65,11 @@ echo "=== 네트워크 연결 수 ===" && ss -tuln | grep -E ':3080|:3090|:3000|
 ```verify expect=0 timeout=15
 # 서비스별 포트 매핑
 case "{{service_name}}" in
-  my-api)      PORT=4000 ;;
-  my-backend)  PORT=3080 ;;
-  my-frontend) PORT=3090 ;;
-  my-worker)   PORT=3100 ;;
-  *)           PORT=3000 ;;
+  soom-api)   PORT=4000 ;;
+  soom-web)   PORT=3080 ;;
+  soomy-web)  PORT=3090 ;;
+  soom-live)  PORT=3100 ;;
+  *)          PORT=3000 ;;
 esac
 curl -sf --max-time 5 "http://localhost:${PORT}/health" > /dev/null 2>&1 || \
 curl -sf --max-time 5 "http://localhost:${PORT}/" > /dev/null 2>&1
@@ -144,6 +144,12 @@ echo "종료시간: $(date '+%Y-%m-%d %H:%M:%S KST')" >> "$REPORT_FILE"
 pm2 describe {{service_name}} 2>/dev/null | grep -E 'status|restart|uptime' >> "$REPORT_FILE"
 echo "=== 보고서 저장: $REPORT_FILE ==="
 cat "$REPORT_FILE"
+```
+
+## 11. AI 최종 요약
+
+```ai
+장애 대응 전체 결과를 최종 요약해 주세요. 서비스 복구 상태, 근본 원인, 재발 방지 조치, 에스컬레이션 필요 여부를 정리해 주세요.
 ```
 
 > src: https://sre.google/workbook/incident-response/

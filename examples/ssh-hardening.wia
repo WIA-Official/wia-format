@@ -1,0 +1,77 @@
+---
+wia: "1"
+title: SSH 보안 강화
+agent: soomy
+inputs:
+  ssh_port: { type: string, default: "2222" }
+  max_auth_tries: { type: string, default: "3" }
+  login_grace_time: { type: string, default: "30" }
+  allowed_users: { type: string, default: "ec2-user" }
+---
+
+# SSH 보안 강화
+
+## 1. sshd_config 백업
+
+```sh run
+sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)
+ls -la /etc/ssh/sshd_config.bak.*
+```
+
+## 2. 루트 로그인 차단
+
+```sh run
+sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+grep "^PermitRootLogin" /etc/ssh/sshd_config
+```
+
+## 3. 비밀번호 인증 비활성화 (키 전용)
+
+```sh run
+sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+```
+
+## 4. SSH 포트 변경
+
+```sh run
+sudo sed -i 's/^#\?Port.*/Port {{ssh_port}}/' /etc/ssh/sshd_config
+grep "^Port" /etc/ssh/sshd_config
+```
+
+## 5. 접속 제한 설정
+
+```sh run
+sudo sed -i 's/^#\?MaxAuthTries.*/MaxAuthTries {{max_auth_tries}}/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?LoginGraceTime.*/LoginGraceTime {{login_grace_time}}/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?ClientAliveInterval.*/ClientAliveInterval 300/' /etc/ssh/sshd_config
+sudo sed -i 's/^#\?ClientAliveCountMax.*/ClientAliveCountMax 2/' /etc/ssh/sshd_config
+```
+
+## 6. 허용 사용자 지정
+
+```sh run
+grep -q "^AllowUsers" /etc/ssh/sshd_config && \
+  sudo sed -i "s/^AllowUsers.*/AllowUsers {{allowed_users}}/" /etc/ssh/sshd_config || \
+  echo "AllowUsers {{allowed_users}}" | sudo tee -a /etc/ssh/sshd_config
+```
+
+## 7. sshd 설정 검증 및 재시작
+
+```sh run
+sudo sshd -t && sudo systemctl restart sshd
+sudo systemctl status sshd --no-pager
+```
+
+## 8. 검증
+
+```verify expect=0
+sudo sshd -t 2>&1 | wc -l | grep -q "0" && grep -q "PermitRootLogin no" /etc/ssh/sshd_config && grep -q "PasswordAuthentication no" /etc/ssh/sshd_config && grep -q "Port {{ssh_port}}" /etc/ssh/sshd_config
+```
+
+## 9. AI 분석
+
+```ai
+SSH 보안 강화 결과를 분석하세요. 포트 변경({{ssh_port}}), 루트 로그인 차단, 키 전용 인증, MaxAuthTries({{max_auth_tries}}) 설정을 확인하고 fail2ban 등 추가 보안 조치가 필요한지 제안해 주세요.
+```

@@ -1,0 +1,65 @@
+---
+wia: "1"
+title: colcon 워크스페이스 생성 및 빌드
+agent: soomy
+inputs:
+  ws_name: { type: string, default: "ros2_ws" }
+---
+
+# colcon 워크스페이스 생성 및 빌드
+
+## 1. 워크스페이스 디렉토리 생성
+
+```sh run
+mkdir -p ~/{{ws_name}}/src
+cd ~/{{ws_name}}
+echo "워크스페이스 경로: $(pwd)"
+```
+
+## 2. 예제 패키지 생성
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+cd ~/{{ws_name}}/src
+ros2 pkg create --build-type ament_cmake --node-name my_node my_package 2>/dev/null || echo "패키지가 이미 존재합니다"
+ls -la ~/{{ws_name}}/src/
+```
+
+## 3. 의존성 설치
+
+```sh run
+cd ~/{{ws_name}}
+sudo apt-get update -q
+rosdep update 2>/dev/null || rosdep init && rosdep update
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+## 4. colcon 빌드
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+cd ~/{{ws_name}}
+colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+```
+
+## 5. 빌드 결과 확인
+
+```sh run
+source ~/{{ws_name}}/install/setup.bash
+ros2 pkg list | grep my_package
+echo ""
+echo "=== 빌드 로그 요약 ==="
+cat ~/{{ws_name}}/log/latest_build/logger_all.log 2>/dev/null | tail -10 || echo "로그 파일 없음"
+```
+
+## 6. 검증
+
+```verify expect=0
+test -d ~/{{ws_name}}/install && test -d ~/{{ws_name}}/build && echo 0 || echo 1
+```
+
+## 7. AI 분석
+
+```ai
+ROS 2 워크스페이스 {{ws_name}} 빌드 결과를 분석해 주세요. 빌드 성공 여부, 경고 메시지, 의존성 상태를 확인하고, CI 파이프라인 통합, 테스트 자동화, 패키지 릴리스 절차를 제안해 주세요.
+```

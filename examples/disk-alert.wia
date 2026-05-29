@@ -1,0 +1,78 @@
+---
+wia: "1"
+title: 디스크 사용량 알림 설정
+agent: soomy
+inputs:
+  threshold: { type: string, default: "80" }
+  alert_email: { type: string }
+---
+
+# 디스크 사용량 알림 설정
+
+## 1. 현재 디스크 사용량 확인
+
+```sh run
+df -h --output=source,pcent,avail,target | grep -v tmpfs
+```
+
+## 2. 메일 전송 도구 설치
+
+```sh run
+which mail > /dev/null 2>&1 && echo "mailx 이미 설치됨" || sudo yum install -y mailx
+```
+
+## 3. 디스크 알림 스크립트 생성
+
+```sh run
+sudo tee /usr/local/bin/disk-alert.sh > /dev/null <<'SCRIPT'
+#!/bin/bash
+THRESHOLD={{threshold}}
+ALERT_EMAIL="{{alert_email}}"
+HOSTNAME=$(hostname)
+
+df -H --output=source,pcent,target | grep -vE '^Filesystem|tmpfs' | while read line; do
+  USAGE=$(echo "$line" | awk '{print $2}' | tr -d '%')
+  PARTITION=$(echo "$line" | awk '{print $3}')
+  if [ "$USAGE" -ge "$THRESHOLD" ]; then
+    echo "경고: ${HOSTNAME}의 ${PARTITION} 파티션 사용량이 ${USAGE}%입니다 (임계값: ${THRESHOLD}%)" | \
+      mail -s "[DISK ALERT] ${HOSTNAME} - ${PARTITION} ${USAGE}% 사용 중" "${ALERT_EMAIL}"
+    logger -t disk-alert "${PARTITION} 사용량 ${USAGE}% - 임계값 ${THRESHOLD}% 초과"
+  fi
+done
+SCRIPT
+
+sudo chmod +x /usr/local/bin/disk-alert.sh
+echo "스크립트 생성 완료"
+```
+
+## 4. cron 작업 등록 (매 10분)
+
+```sh run
+CRON_ENTRY="*/10 * * * * /usr/local/bin/disk-alert.sh"
+(crontab -l 2>/dev/null | grep -v "disk-alert.sh"; echo "$CRON_ENTRY") | crontab -
+echo "cron 등록 완료"
+crontab -l | grep disk-alert
+```
+
+## 5. 검증 - 스크립트 및 cron 등록 확인
+
+```verify expect=0
+test -x /usr/local/bin/disk-alert.sh && crontab -l | grep -q "disk-alert.sh"
+```
+
+## 6. 테스트 실행
+
+```sh run
+bash -x /usr/local/bin/disk-alert.sh 2>&1
+echo "--- syslog 확인 ---"
+grep "disk-alert" /var/log/messages 2>/dev/null | tail -3 || echo "알림 발생 내역 없음 (임계값 미만)"
+```
+
+## 7. AI 분석
+
+```ai
+디스크 사용량 알림 설정 결과를 분석해줘.
+임계값: {{threshold}}%, 알림 수신: {{alert_email}}.
+현재 각 파티션의 사용량을 기준으로 알림이 발생할 가능성이 있는 파티션을 식별하고,
+디스크 정리 권장 사항과 알림 스크립트의 개선점이 있다면 제안해줘.
+```

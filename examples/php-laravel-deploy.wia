@@ -1,0 +1,107 @@
+---
+wia: "1"
+title: Laravel 배포 Composer + Nginx + PHP-FPM
+agent: soomy
+inputs:
+  domain: { type: string, default: "app.example.com" }
+  db_name: { type: string, default: "laravel_db" }
+  db_user: { type: string, default: "laravel_user" }
+  db_pass: { type: secret }
+---
+
+# Laravel 배포 Composer + Nginx + PHP-FPM
+
+## 1. PHP 및 필수 확장 설치
+
+```sh run
+sudo dnf install -y php php-fpm php-mysqlnd php-pdo php-mbstring php-xml php-bcmath php-json php-zip php-curl php-gd unzip || \
+sudo apt-get install -y php-fpm php-mysql php-mbstring php-xml php-bcmath php-zip php-curl php-gd unzip
+```
+
+## 2. Composer 설치
+
+```sh run
+if ! command -v composer &>/dev/null; then
+  curl -sS https://getcomposer.org/installer | php
+  sudo mv composer.phar /usr/local/bin/composer
+fi
+composer --version
+```
+
+## 3. Laravel 의존성 설치 및 환경 설정
+
+```sh run
+cd /var/www/{{domain}}
+composer install --no-dev --optimize-autoloader
+cp .env.example .env 2>/dev/null || true
+sed -i "s/DB_DATABASE=.*/DB_DATABASE={{db_name}}/" .env
+sed -i "s/DB_USERNAME=.*/DB_USERNAME={{db_user}}/" .env
+sed -i "s/DB_PASSWORD=.*/DB_PASSWORD={{db_pass}}/" .env
+php artisan key:generate --force
+```
+
+## 4. 데이터베이스 마이그레이션 및 캐시 최적화
+
+```sh run
+cd /var/www/{{domain}}
+php artisan migrate --force
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+```
+
+## 5. 디렉토리 권한 설정
+
+```sh run
+cd /var/www/{{domain}}
+sudo chown -R ec2-user:nginx . 2>/dev/null || sudo chown -R ec2-user:www-data .
+sudo chmod -R 755 storage bootstrap/cache
+sudo chcon -Rt httpd_sys_rw_content_t storage bootstrap/cache 2>/dev/null || true
+```
+
+## 6. Nginx 서버 블록 설정
+
+```sh run
+sudo tee /etc/nginx/conf.d/{{domain}}.conf > /dev/null <<'CONF'
+server {
+    listen 80;
+    server_name {{domain}};
+    root /var/www/{{domain}}/public;
+    index index.php;
+
+    client_max_body_size 20M;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass unix:/run/php-fpm/www.sock;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\.(?!well-known) {
+        deny all;
+    }
+}
+CONF
+sudo nginx -t && sudo systemctl reload nginx
+sudo systemctl enable --now php-fpm || sudo systemctl enable --now php8.2-fpm
+```
+
+## 7. 검증
+
+```verify expect=0
+curl -sSo /dev/null -w "%{http_code}" -H "Host: {{domain}}" http://localhost | grep -q "200\|302"
+```
+
+```verify expect=0
+cd /var/www/{{domain}} && php artisan --version
+```
+
+## 8. AI 분석
+
+```ai
+Laravel APP_DEBUG 설정, .env 파일 노출 위험, PHP-FPM pool 튜닝, OPcache 활성화 여부, storage 디렉토리 권한을 점검하고 프로덕션 보안 강화 권고사항을 제시하세요.
+```

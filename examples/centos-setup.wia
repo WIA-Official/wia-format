@@ -1,0 +1,76 @@
+---
+wia: "1"
+title: CentOS/Rocky Linux 초기 설정
+agent: soomy
+inputs:
+  hostname: { type: string, default: "centos-server" }
+  timezone: { type: string, default: "Asia/Seoul" }
+  packages: { type: string, default: "curl wget git vim htop net-tools unzip jq tar" }
+---
+
+# CentOS/Rocky Linux 초기 설정
+
+## 1. 호스트명 설정
+
+```sh run
+sudo hostnamectl set-hostname {{hostname}}
+echo "127.0.1.1 {{hostname}}" | sudo tee -a /etc/hosts
+hostnamectl
+```
+
+## 2. 타임존 설정
+
+```sh run
+sudo timedatectl set-timezone {{timezone}}
+timedatectl
+```
+
+## 3. EPEL 저장소 활성화
+
+```sh run
+sudo dnf install -y epel-release
+sudo dnf makecache
+```
+
+## 4. 시스템 패키지 업데이트
+
+```sh run
+sudo dnf update -y
+sudo dnf autoremove -y
+```
+
+## 5. 필수 패키지 설치
+
+```sh run
+sudo dnf install -y {{packages}}
+```
+
+## 6. firewalld 설정
+
+```sh run
+sudo systemctl enable --now firewalld
+sudo firewall-cmd --permanent --add-service=ssh
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --reload
+sudo firewall-cmd --list-all
+```
+
+## 7. SELinux 상태 확인
+
+```sh run
+getenforce
+sestatus
+```
+
+## 8. 검증
+
+```verify expect=0
+hostnamectl | grep -q "{{hostname}}" && timedatectl | grep -q "{{timezone}}" && sudo firewall-cmd --state | grep -q "running"
+```
+
+## 9. AI 분석
+
+```ai
+CentOS/Rocky Linux 초기 설정 결과를 분석하세요. 호스트명, 타임존, DNF 업데이트, firewalld 규칙, SELinux 상태를 확인하고 프로덕션 환경에서 추가로 필요한 설정을 제안해 주세요.
+```

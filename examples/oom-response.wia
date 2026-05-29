@@ -1,0 +1,68 @@
+---
+wia: "1"
+title: 메모리 부족(OOM) 대응
+agent: soomy
+inputs:
+  time_range: { type: string, default: "1h" }
+---
+
+# 메모리 부족(OOM) 대응
+
+## 1. OOM Killer 로그 확인
+
+```sh run
+dmesg -T | grep -i "oom\|out of memory\|killed process" | tail -20
+```
+
+## 2. 현재 메모리 상태 확인
+
+```sh run
+free -h && echo "---" && cat /proc/meminfo | grep -E "MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree"
+```
+
+## 3. 메모리 상위 프로세스 확인
+
+```sh run
+ps aux --sort=-rss | head -20
+```
+
+## 4. Swap 사용 현황
+
+```sh run
+swapon -s 2>/dev/null || echo "Swap 미설정"
+echo "---"
+for pid in $(ls /proc/ | grep -E '^[0-9]+$' | head -50); do
+  if [ -f /proc/$pid/smaps_rollup ]; then
+    swap=$(awk '/Swap:/{sum+=$2} END{print sum}' /proc/$pid/smaps_rollup 2>/dev/null)
+    if [ "${swap:-0}" -gt 10240 ]; then
+      comm=$(cat /proc/$pid/comm 2>/dev/null)
+      echo "PID=$pid COMM=$comm SWAP=${swap}kB"
+    fi
+  fi
+done | sort -t= -k4 -rn | head -10
+```
+
+## 5. 캐시 확인 및 정리 가능 여부
+
+```sh run
+echo "=== Slab 상위 ==="
+cat /proc/slabinfo | awk 'NR>2{print $1, $3*$4}' | sort -k2 -rn | head -10
+echo "---"
+echo "캐시 정리 명령: sync && echo 3 > /proc/sys/vm/drop_caches"
+```
+
+## 6. 검증
+
+```verify expect=0
+AVAIL=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+[ "$AVAIL" -gt 512 ] && exit 0 || exit 1
+```
+
+## 7. AI 분석
+
+```ai
+OOM 로그, 메모리 사용 현황, 상위 프로세스 RSS, Swap 상태를 종합 분석하여:
+1. OOM 발생 원인 (메모리 누수, 과다 할당, 캐시 비정상 등)을 판별하라
+2. 어떤 프로세스를 재시작하면 메모리를 회수할 수 있는지 제시하라
+3. vm.overcommit_memory, OOM score 조정 등 재발 방지 방안을 제안하라
+```

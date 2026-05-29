@@ -1,0 +1,84 @@
+---
+wia: "1"
+title: 스왑 파일 생성 및 설정
+agent: soomy
+inputs:
+  swap_size: { type: string, default: "2G" }
+  swap_path: { type: string, default: "/swapfile" }
+  swappiness: { type: string, default: "10" }
+  vfs_cache_pressure: { type: string, default: "50" }
+---
+
+# 스왑 파일 생성 및 설정
+
+## 1. 현재 스왑 상태 확인
+
+```sh run
+free -h
+swapon --show
+```
+
+## 2. 기존 스왑 파일 확인
+
+```sh run
+if [ -f {{swap_path}} ]; then
+  echo "WARNING: {{swap_path}} already exists"
+  ls -lh {{swap_path}}
+else
+  echo "No existing swap file at {{swap_path}}"
+fi
+```
+
+## 3. 스왑 파일 생성
+
+```sh run
+sudo fallocate -l {{swap_size}} {{swap_path}}
+sudo chmod 600 {{swap_path}}
+ls -lh {{swap_path}}
+```
+
+## 4. 스왑 영역 포맷 및 활성화
+
+```sh run
+sudo mkswap {{swap_path}}
+sudo swapon {{swap_path}}
+swapon --show
+```
+
+## 5. fstab 영구 등록
+
+```sh run
+if ! grep -q "{{swap_path}}" /etc/fstab; then
+  echo "{{swap_path}} none swap sw 0 0" | sudo tee -a /etc/fstab
+  echo "fstab entry added"
+else
+  echo "fstab entry already exists"
+fi
+```
+
+## 6. swappiness 및 cache pressure 설정
+
+```sh run
+sudo sysctl vm.swappiness={{swappiness}}
+sudo sysctl vm.vfs_cache_pressure={{vfs_cache_pressure}}
+
+grep -q "vm.swappiness" /etc/sysctl.conf && \
+  sudo sed -i "s/^vm.swappiness.*/vm.swappiness={{swappiness}}/" /etc/sysctl.conf || \
+  echo "vm.swappiness={{swappiness}}" | sudo tee -a /etc/sysctl.conf
+
+grep -q "vm.vfs_cache_pressure" /etc/sysctl.conf && \
+  sudo sed -i "s/^vm.vfs_cache_pressure.*/vm.vfs_cache_pressure={{vfs_cache_pressure}}/" /etc/sysctl.conf || \
+  echo "vm.vfs_cache_pressure={{vfs_cache_pressure}}" | sudo tee -a /etc/sysctl.conf
+```
+
+## 7. 검증
+
+```verify expect=0
+swapon --show | grep -q "{{swap_path}}" && grep -q "{{swap_path}}" /etc/fstab && [ "$(cat /proc/sys/vm/swappiness)" = "{{swappiness}}" ]
+```
+
+## 8. AI 분석
+
+```ai
+스왑 설정 결과를 분석하세요. 스왑 파일 크기({{swap_size}}), swappiness({{swappiness}}), vfs_cache_pressure({{vfs_cache_pressure}}) 값이 서버 메모리 대비 적절한지 평가하고 OOM 방지를 위한 추가 권장 사항을 제안해 주세요.
+```

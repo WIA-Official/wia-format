@@ -1,0 +1,71 @@
+---
+wia: "1"
+title: 로그 로테이션 설정
+agent: soomy
+inputs:
+  log_path: { type: string }
+  max_size: { type: string, default: "100M" }
+  rotate_count: { type: string, default: "7" }
+---
+
+# 로그 로테이션 설정
+
+## 1. 대상 로그 경로 확인
+
+```sh run
+ls -lh {{log_path}} 2>/dev/null && echo "--- 현재 디스크 사용량 ---" && du -sh $(dirname {{log_path}})
+```
+
+## 2. logrotate 설치 확인
+
+```sh run
+which logrotate && logrotate --version 2>&1 | head -1 || sudo yum install -y logrotate
+```
+
+## 3. logrotate 설정 파일 생성
+
+```sh run
+CONF_NAME=$(echo "{{log_path}}" | sed 's|/|_|g; s|^_||')
+sudo tee /etc/logrotate.d/${CONF_NAME} > /dev/null <<'CONF'
+{{log_path}} {
+    size {{max_size}}
+    rotate {{rotate_count}}
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    dateext
+    dateformat -%Y%m%d
+}
+CONF
+echo "설정 파일 생성 완료: /etc/logrotate.d/${CONF_NAME}"
+```
+
+## 4. 설정 문법 검증
+
+```sh run
+sudo logrotate -d /etc/logrotate.conf 2>&1 | grep -A2 "{{log_path}}" || echo "설정 파싱 완료"
+```
+
+## 5. 검증 - 설정 파일 존재 및 내용 확인
+
+```verify expect=0
+CONF_NAME=$(echo "{{log_path}}" | sed 's|/|_|g; s|^_||') && test -f /etc/logrotate.d/${CONF_NAME} && grep -q "rotate {{rotate_count}}" /etc/logrotate.d/${CONF_NAME}
+```
+
+## 6. 강제 로테이션 테스트
+
+```sh run
+sudo logrotate -f /etc/logrotate.conf 2>&1 | tail -5
+ls -lt $(dirname {{log_path}})/ | head -10
+```
+
+## 7. AI 분석
+
+```ai
+로그 로테이션 설정 결과를 분석해줘.
+대상 경로: {{log_path}}, 최대 크기: {{max_size}}, 보관 횟수: {{rotate_count}}.
+설정이 올바르게 적용되었는지, 강제 로테이션 테스트 결과가 정상인지 확인하고,
+디스크 공간 절약 효과와 추가 최적화 방안을 제안해줘.
+```

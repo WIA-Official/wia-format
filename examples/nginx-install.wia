@@ -1,0 +1,78 @@
+---
+wia: "1"
+title: Nginx 설치 및 기본 설정 + SSL 적용
+agent: soomy
+inputs:
+  domain: { type: string, default: "example.com" }
+  email: { type: string, default: "admin@example.com" }
+---
+
+# Nginx 설치 및 기본 설정 + SSL 적용
+
+## 1. Nginx 패키지 설치
+
+```sh run
+sudo dnf install -y nginx || sudo apt-get install -y nginx
+```
+
+## 2. 기본 서버 블록 설정
+
+```sh run
+sudo tee /etc/nginx/conf.d/{{domain}}.conf > /dev/null <<'CONF'
+server {
+    listen 80;
+    server_name {{domain}} www.{{domain}};
+    root /var/www/{{domain}}/html;
+    index index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+}
+CONF
+```
+
+## 3. 웹 루트 디렉토리 생성 및 테스트 페이지 배치
+
+```sh run
+sudo mkdir -p /var/www/{{domain}}/html
+echo "<h1>Welcome to {{domain}}</h1>" | sudo tee /var/www/{{domain}}/html/index.html
+sudo chown -R nginx:nginx /var/www/{{domain}}
+```
+
+## 4. Nginx 설정 검증 및 서비스 시작
+
+```sh run
+sudo nginx -t
+sudo systemctl enable --now nginx
+```
+
+## 5. Certbot 설치 및 SSL 인증서 발급
+
+```sh run
+sudo dnf install -y certbot python3-certbot-nginx || sudo apt-get install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d {{domain}} -d www.{{domain}} --non-interactive --agree-tos -m {{email}}
+```
+
+## 6. SSL 자동 갱신 타이머 확인
+
+```sh run
+sudo systemctl enable --now certbot-renew.timer || sudo certbot renew --dry-run
+```
+
+## 7. 검증
+
+```verify expect=0
+curl -sSo /dev/null -w "%{http_code}" https://{{domain}} | grep -q "200"
+```
+
+## 8. AI 분석
+
+```ai
+Nginx 설치 상태, SSL 인증서 유효성, 서버 블록 설정의 보안 헤더 누락 여부를 분석하고 개선 권고사항을 제시하세요.
+```

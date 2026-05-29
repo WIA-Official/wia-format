@@ -1,0 +1,64 @@
+---
+wia: "1"
+title: S3로 자동 백업
+agent: soomy
+inputs:
+  source_dir: { type: string, default: "/var/www/html" }
+  s3_bucket: { type: string, default: "my-backup-bucket" }
+---
+
+# S3로 자동 백업
+
+## 1. S3 버킷 확인
+
+```sh run
+aws s3 ls s3://{{s3_bucket}} 2>/dev/null && echo "버킷 존재 확인" || {
+  echo "버킷이 없습니다. 생성합니다."
+  aws s3 mb s3://{{s3_bucket}} --region ap-northeast-2
+}
+```
+
+## 2. 소스 디렉토리 확인
+
+```sh run
+echo "=== 백업 대상 디렉토리 ==="
+du -sh {{source_dir}}
+ls -la {{source_dir}} | head -20
+```
+
+## 3. S3 동기화 실행
+
+```sh run
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+aws s3 sync {{source_dir}} s3://{{s3_bucket}}/backup-${TIMESTAMP}/ \
+  --exclude "*.tmp" --exclude "*.log" \
+  --storage-class STANDARD_IA
+echo "백업 경로: s3://{{s3_bucket}}/backup-${TIMESTAMP}/"
+```
+
+## 4. 백업 결과 확인
+
+```sh run
+aws s3 ls s3://{{s3_bucket}}/ --recursive --summarize | tail -5
+```
+
+## 5. 크론 자동화 등록
+
+```sh run
+CRON_CMD="0 2 * * * aws s3 sync {{source_dir}} s3://{{s3_bucket}}/daily-\$(date +\\%Y\\%m\\%d)/ --exclude '*.tmp' --exclude '*.log' --storage-class STANDARD_IA"
+(crontab -l 2>/dev/null | grep -v "{{s3_bucket}}" ; echo "$CRON_CMD") | crontab -
+echo "=== 등록된 크론 ==="
+crontab -l | grep "{{s3_bucket}}"
+```
+
+## 6. 검증
+
+```verify expect=0
+aws s3 ls s3://{{s3_bucket}}/ 2>/dev/null | wc -l | awk '{print ($1 > 0) ? 0 : 1}'
+```
+
+## 7. AI 분석
+
+```ai
+S3 백업 설정을 분석해 주세요. 백업 크기, 스토리지 클래스 적절성, 크론 주기를 검토하고, 버전 관리, 수명 주기 정책, 교차 리전 복제 등 재해 복구 전략을 제안해 주세요.
+```

@@ -1,0 +1,155 @@
+---
+wia: "1"
+title: 장애 사후 분석 보고서 생성
+agent: soomy
+inputs:
+  incident_id: { type: string, default: "INC-001" }
+  incident_date: { type: string, default: "2026-01-01" }
+---
+
+# 장애 사후 분석 보고서 생성
+
+## 1. 시스템 상태 스냅샷 수집
+
+```sh run
+echo "=========================================="
+echo "  장애 사후 분석: {{incident_id}}"
+echo "  장애 일시: {{incident_date}}"
+echo "  보고서 생성: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "=========================================="
+echo ""
+echo "=== 현재 시스템 상태 ==="
+echo "호스트: $(hostname)"
+echo "가동시간: $(uptime)"
+echo ""
+echo "=== 리소스 현황 ==="
+echo "--- CPU ---"
+top -bn1 | head -5
+echo ""
+echo "--- 메모리 ---"
+free -h
+echo ""
+echo "--- 디스크 ---"
+df -h | grep -v tmpfs
+```
+
+## 2. 장애 시점 로그 수집
+
+```sh run
+echo "=== {{incident_date}} 시스템 로그 ==="
+sudo journalctl --since "{{incident_date}} 00:00:00" --until "{{incident_date}} 23:59:59" --priority=err --no-pager | tail -30
+echo ""
+echo "=== 커널 에러/경고 ==="
+sudo journalctl --since "{{incident_date}} 00:00:00" --until "{{incident_date}} 23:59:59" -k --priority=warning --no-pager | tail -20
+echo ""
+echo "=== OOM Killer 이벤트 ==="
+sudo journalctl --since "{{incident_date}} 00:00:00" --until "{{incident_date}} 23:59:59" --no-pager | grep -i 'oom\|out of memory' | tail -10
+echo ""
+echo "=== 서비스 재시작 이벤트 ==="
+sudo journalctl --since "{{incident_date}} 00:00:00" --until "{{incident_date}} 23:59:59" --no-pager | grep -iE '(started|stopped|failed|restarting)' | tail -20
+```
+
+## 3. 타임라인 구성
+
+```sh run
+REPORT_DIR="/tmp/postmortem-{{incident_id}}"
+mkdir -p "$REPORT_DIR"
+
+cat > "$REPORT_DIR/postmortem-{{incident_id}}.md" <<'PMEOF'
+# 장애 사후 분석 보고서
+
+## 기본 정보
+| 항목 | 내용 |
+|------|------|
+| 장애 ID | {{incident_id}} |
+| 장애 일시 | {{incident_date}} |
+| 보고서 작성일 | $(date '+%Y-%m-%d') |
+| 작성자 | (이름 기입) |
+| 심각도 | (P1/P2/P3/P4) |
+
+## 요약
+(장애 내용을 1-2문장으로 요약)
+
+## 영향 범위
+- 영향받은 서비스:
+- 영향받은 사용자 수:
+- 지속 시간:
+- 매출 영향:
+
+## 타임라인
+| 시각 | 이벤트 |
+|------|--------|
+| HH:MM | 최초 이상 징후 감지 |
+| HH:MM | 알림 발생 |
+| HH:MM | 대응 시작 |
+| HH:MM | 원인 파악 |
+| HH:MM | 조치 완료 |
+| HH:MM | 서비스 정상화 확인 |
+
+## 근본 원인 (Root Cause)
+(근본 원인 상세 기술)
+
+## 조치 내용
+1. (즉시 조치 사항)
+2. (임시 우회 조치)
+3. (영구 해결 방안)
+
+## 재발 방지 Action Items
+| # | 조치 항목 | 담당자 | 기한 | 우선순위 |
+|---|----------|--------|------|----------|
+| 1 | | | | P1 |
+| 2 | | | | P2 |
+| 3 | | | | P3 |
+
+## 교훈 (Lessons Learned)
+### 잘된 점
+-
+
+### 개선할 점
+-
+
+## 참고 자료
+- 관련 대시보드 링크:
+- 관련 알림 링크:
+- 관련 코드 변경:
+PMEOF
+
+echo "보고서 템플릿 생성 완료: $REPORT_DIR/postmortem-{{incident_id}}.md"
+echo ""
+cat "$REPORT_DIR/postmortem-{{incident_id}}.md"
+```
+
+## 4. 메트릭 요약 수집
+
+```sh run
+echo "=== {{incident_date}} 리소스 사용 이력 (sar) ==="
+if command -v sar &>/dev/null; then
+  echo "--- CPU ---"
+  sar -u -f /var/log/sa/sa$(date -d "{{incident_date}}" +%d 2>/dev/null || echo "01") 2>/dev/null | tail -10 || echo "해당 날짜 sar 데이터 없음"
+  echo ""
+  echo "--- 메모리 ---"
+  sar -r -f /var/log/sa/sa$(date -d "{{incident_date}}" +%d 2>/dev/null || echo "01") 2>/dev/null | tail -10 || echo "해당 날짜 sar 데이터 없음"
+else
+  echo "sar 없음 — sysstat 패키지 설치 권장"
+fi
+echo ""
+echo "=== 최근 로그인 이력 ==="
+last -10 2>/dev/null
+```
+
+## 5. 검증
+
+```verify expect=0
+test -f /tmp/postmortem-{{incident_id}}/postmortem-{{incident_id}}.md
+```
+
+## 6. AI 분석
+
+```ai
+장애 사후 분석 보고서({{incident_id}}) 데이터를 분석해 주세요:
+1. 수집된 로그에서 장애 근본 원인 후보 도출
+2. 타임라인 초안 작성 (로그 기반)
+3. 재발 방지를 위한 Action Item 제안 (우선순위 포함)
+4. 모니터링/알림 개선 권고
+5. 보고서 템플릿의 빈칸을 수집된 데이터로 채워주세요
+```

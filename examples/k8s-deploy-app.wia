@@ -1,0 +1,112 @@
+---
+wia: "1"
+title: 앱 배포 Deployment+Service+Ingress
+agent: soomy
+inputs:
+  app_name: { type: string, default: "myapp" }
+  image: { type: string, default: "nginx:latest" }
+  replicas: { type: string, default: "3" }
+---
+
+# 앱 배포 Deployment+Service+Ingress
+
+## 1. 네임스페이스 확인 및 생성
+
+```sh run
+kubectl get ns {{app_name}} 2>/dev/null || kubectl create ns {{app_name}}
+```
+
+## 2. Deployment 생성
+
+```sh run
+cat <<'MANIFEST' | sed "s/__APP__/{{app_name}}/g; s|__IMAGE__|{{image}}|g; s/__REPLICAS__/{{replicas}}/g" | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __APP__
+  namespace: __APP__
+spec:
+  replicas: __REPLICAS__
+  selector:
+    matchLabels:
+      app: __APP__
+  template:
+    metadata:
+      labels:
+        app: __APP__
+    spec:
+      containers:
+      - name: __APP__
+        image: __IMAGE__
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+MANIFEST
+```
+
+## 3. Service 생성
+
+```sh run
+cat <<'MANIFEST' | sed "s/__APP__/{{app_name}}/g" | kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: __APP__
+  namespace: __APP__
+spec:
+  selector:
+    app: __APP__
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+MANIFEST
+```
+
+## 4. Ingress 생성
+
+```sh run
+cat <<'MANIFEST' | sed "s/__APP__/{{app_name}}/g" | kubectl apply -f -
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: __APP__
+  namespace: __APP__
+spec:
+  rules:
+  - host: __APP__.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: __APP__
+            port:
+              number: 80
+MANIFEST
+```
+
+## 5. 롤아웃 대기
+
+```sh run
+kubectl rollout status deployment/{{app_name}} -n {{app_name}} --timeout=120s
+```
+
+## 6. 검증
+
+```verify expect=0
+kubectl get deployment {{app_name}} -n {{app_name}} -o jsonpath='{.status.readyReplicas}' | grep -q '{{replicas}}' && echo 0 || echo 1
+```
+
+## 7. AI 분석
+
+```ai
+배포된 {{app_name}} 앱의 Deployment, Service, Ingress 상태를 분석하고 프로덕션 준비 상태인지 점검해 주세요. 리소스 제한, 헬스체크 누락 등 개선점을 제안해 주세요.
+```

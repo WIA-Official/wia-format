@@ -1,0 +1,70 @@
+---
+wia: "1"
+title: Apache 가상호스트 추가 설정
+agent: soomy
+inputs:
+  domain: { type: string, default: "example.com" }
+  doc_root: { type: string, default: "/var/www/example.com/html" }
+---
+
+# Apache 가상호스트 추가 설정
+
+## 1. Apache 설치 확인 및 필수 모듈 활성화
+
+```sh run
+sudo dnf install -y httpd mod_ssl || sudo apt-get install -y apache2
+sudo systemctl enable httpd || sudo systemctl enable apache2
+```
+
+## 2. 문서 루트 디렉토리 생성
+
+```sh run
+sudo mkdir -p {{doc_root}}
+echo "<h1>{{domain}} is live</h1>" | sudo tee {{doc_root}}/index.html
+sudo chown -R apache:apache {{doc_root}} 2>/dev/null || sudo chown -R www-data:www-data {{doc_root}}
+```
+
+## 3. 가상호스트 설정 파일 생성
+
+```sh run
+sudo tee /etc/httpd/conf.d/{{domain}}.conf > /dev/null 2>&1 <<'VHOST' || sudo tee /etc/apache2/sites-available/{{domain}}.conf > /dev/null <<'VHOST'
+<VirtualHost *:80>
+    ServerName {{domain}}
+    ServerAlias www.{{domain}}
+    DocumentRoot {{doc_root}}
+
+    <Directory {{doc_root}}>
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog logs/{{domain}}-error.log
+    CustomLog logs/{{domain}}-access.log combined
+</VirtualHost>
+VHOST
+```
+
+## 4. 사이트 활성화 (Debian 계열)
+
+```sh run
+sudo a2ensite {{domain}}.conf 2>/dev/null || echo "RHEL-based: conf.d auto-loaded"
+```
+
+## 5. 설정 문법 검사 및 재시작
+
+```sh run
+sudo apachectl configtest
+sudo systemctl restart httpd || sudo systemctl restart apache2
+```
+
+## 6. 검증
+
+```verify expect=0
+curl -sSo /dev/null -w "%{http_code}" -H "Host: {{domain}}" http://localhost | grep -q "200"
+```
+
+## 7. AI 분석
+
+```ai
+Apache 가상호스트 설정의 보안 취약점(Directory Listing, .htaccess 위험 등)을 점검하고 성능 최적화 권고사항을 제시하세요.
+```

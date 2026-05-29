@@ -1,0 +1,91 @@
+---
+wia: "1"
+title: Node.js 앱 배포 PM2 + Nginx 리버스 프록시
+agent: soomy
+inputs:
+  app_name: { type: string, default: "myapp" }
+  port: { type: string, default: "3000" }
+  domain: { type: string, default: "app.example.com" }
+---
+
+# Node.js 앱 배포 PM2 + Nginx 리버스 프록시
+
+## 1. Node.js 런타임 설치 확인
+
+```sh run
+node --version || {
+  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+  sudo dnf install -y nodejs
+}
+npm --version
+```
+
+## 2. PM2 전역 설치
+
+```sh run
+sudo npm install -g pm2
+pm2 --version
+```
+
+## 3. 앱 의존성 설치 및 빌드
+
+```sh run
+cd /opt/{{app_name}}
+npm ci --production
+npm run build 2>/dev/null || echo "No build step defined"
+```
+
+## 4. PM2로 앱 프로세스 등록 및 시작
+
+```sh run
+cd /opt/{{app_name}}
+pm2 delete {{app_name}} 2>/dev/null || true
+PORT={{port}} pm2 start npm --name {{app_name}} -- start
+pm2 save
+pm2 startup | tail -1 | sudo bash
+```
+
+## 5. Nginx 리버스 프록시 설정
+
+```sh run
+sudo tee /etc/nginx/conf.d/{{app_name}}.conf > /dev/null <<'CONF'
+upstream {{app_name}}_backend {
+    server 127.0.0.1:{{port}};
+    keepalive 64;
+}
+
+server {
+    listen 80;
+    server_name {{domain}};
+
+    location / {
+        proxy_pass http://{{app_name}}_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+}
+CONF
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+## 6. 검증
+
+```verify expect=0
+curl -sSo /dev/null -w "%{http_code}" http://localhost:{{port}}/
+```
+
+```verify expect=0
+pm2 show {{app_name}} | grep -q "online"
+```
+
+## 7. AI 분석
+
+```ai
+PM2 클러스터 모드 적용 여부, Nginx 프록시 설정의 WebSocket 지원, 메모리 제한 설정, 로그 로테이션 구성을 점검하고 프로덕션 최적화 권고사항을 제시하세요.
+```

@@ -1,0 +1,57 @@
+---
+wia: "1"
+title: rosbag 녹화 및 재생 분석
+agent: soomy
+inputs:
+  topics: { type: string, default: "/chatter /rosout" }
+  bag_name: { type: string, default: "recording" }
+---
+
+# rosbag 녹화 및 재생 분석
+
+## 1. 현재 토픽 확인
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+echo "=== 활성 토픽 ==="
+ros2 topic list -t
+```
+
+## 2. rosbag 녹화
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+mkdir -p ~/bags
+echo "녹화 시작: {{bag_name}} (토픽: {{topics}})"
+timeout 10 ros2 bag record -o ~/bags/{{bag_name}} {{topics}} 2>&1 || echo "녹화 완료 (타임아웃)"
+```
+
+## 3. 녹화 정보 확인
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+ros2 bag info ~/bags/{{bag_name}}
+echo ""
+echo "=== 파일 크기 ==="
+du -sh ~/bags/{{bag_name}}
+```
+
+## 4. rosbag 재생
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+echo "재생 시작: {{bag_name}}"
+timeout 10 ros2 bag play ~/bags/{{bag_name}} --rate 2.0 2>&1 || echo "재생 완료"
+```
+
+## 5. 검증
+
+```verify expect=0
+test -d ~/bags/{{bag_name}} && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+rosbag {{bag_name}} 녹화 및 재생 결과를 분석해 주세요. 녹화된 토픽 목록, 메시지 수, 녹화 시간, 파일 크기를 확인하고, 데이터 품질 검증, 대용량 bag 파일 관리, 오프라인 분석 도구(PlotJuggler, foxglove)를 제안해 주세요.
+```

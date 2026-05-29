@@ -1,0 +1,100 @@
+---
+wia: "1"
+title: Prometheus + Grafana 설치
+agent: soomy
+inputs:
+  prometheus_port: { type: string, default: "9090" }
+  grafana_port: { type: string, default: "3000" }
+---
+
+# Prometheus + Grafana 설치
+
+## 1. 사전 준비 - 시스템 패키지 업데이트
+
+```sh run
+sudo yum update -y && sudo yum install -y wget tar
+```
+
+## 2. Prometheus 사용자 및 디렉토리 생성
+
+```sh run
+sudo useradd --no-create-home --shell /bin/false prometheus || true
+sudo mkdir -p /etc/prometheus /var/lib/prometheus
+sudo chown prometheus:prometheus /var/lib/prometheus
+```
+
+## 3. Prometheus 다운로드 및 설치
+
+```sh run
+cd /tmp
+PROM_VERSION="2.53.0"
+wget -q https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz
+tar xzf prometheus-${PROM_VERSION}.linux-amd64.tar.gz
+sudo cp prometheus-${PROM_VERSION}.linux-amd64/{prometheus,promtool} /usr/local/bin/
+sudo cp -r prometheus-${PROM_VERSION}.linux-amd64/{consoles,console_libraries} /etc/prometheus/
+sudo chown -R prometheus:prometheus /etc/prometheus
+```
+
+## 4. Prometheus systemd 서비스 등록
+
+```sh run
+sudo tee /etc/systemd/system/prometheus.service > /dev/null <<'UNIT'
+[Unit]
+Description=Prometheus Monitoring
+After=network.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus \
+  --web.listen-address=0.0.0.0:{{prometheus_port}}
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now prometheus
+```
+
+## 5. Grafana 설치 및 시작
+
+```sh run
+sudo tee /etc/yum.repos.d/grafana.repo > /dev/null <<'REPO'
+[grafana]
+name=Grafana OSS
+baseurl=https://rpm.grafana.com
+repo_gpgcheck=1
+enabled=1
+gpgcheck=1
+gpgkey=https://rpm.grafana.com/gpg.key
+sslverify=1
+REPO
+
+sudo yum install -y grafana
+sudo sed -i "s/^;http_port = 3000/http_port = {{grafana_port}}/" /etc/grafana/grafana.ini
+sudo systemctl enable --now grafana-server
+```
+
+## 6. 검증 - 서비스 상태 확인
+
+```verify expect=0
+systemctl is-active prometheus && systemctl is-active grafana-server
+```
+
+## 7. 검증 - 포트 리스닝 확인
+
+```verify expect=0
+ss -tlnp | grep -q ':{{prometheus_port}}' && ss -tlnp | grep -q ':{{grafana_port}}'
+```
+
+## 8. AI 분석
+
+```ai
+Prometheus(포트 {{prometheus_port}})와 Grafana(포트 {{grafana_port}}) 설치 결과를 분석해줘.
+두 서비스가 정상 작동 중인지, 방화벽이나 SELinux 이슈는 없는지,
+그리고 Grafana에서 Prometheus 데이터소스를 추가하기 위한 다음 단계를 안내해줘.
+```

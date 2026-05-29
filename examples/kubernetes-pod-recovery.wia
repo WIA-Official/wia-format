@@ -9,7 +9,7 @@ agent:
     - watch 모드로 복구 진행 상황 모니터링
 inputs:
   namespace: { type: string, default: "default", description: "K8s 네임스페이스" }
-  pod_prefix: { type: string, description: "복구할 파드 이름 접두사 (예: my-api, nginx)" }
+  pod_prefix: { type: string, description: "복구할 파드 이름 접두사 (예: soom-api, nginx)" }
 ---
 
 # Kubernetes 파드 복구: {{pod_prefix}} ({{namespace}})
@@ -141,6 +141,12 @@ fi
 echo "=== [$(date '+%H:%M:%S')] 파드 상태 모니터링 ===" && \
 kubectl get pods -n {{namespace}} 2>&1 | grep -E "{{pod_prefix}}|NAME" && \
 echo "--- Running 파드 수: $(kubectl get pods -n {{namespace}} 2>/dev/null | grep '{{pod_prefix}}' | grep -c Running) ---"
+```
+
+## 11. AI 최종 복구 요약
+
+```ai
+파드 복구 작업 전체 결과를 요약해 주세요. 복구된 파드, 남은 문제, 재발 방지를 위한 리소스 제한/Probe 설정 권장사항을 알려주세요.
 ```
 
 > src: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/

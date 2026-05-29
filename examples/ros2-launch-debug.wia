@@ -1,0 +1,60 @@
+---
+wia: "1"
+title: ROS 2 launch 파일 디버깅
+agent: soomy
+inputs:
+  package_name: { type: string, default: "my_package" }
+  launch_file: { type: string, default: "my_launch.py" }
+---
+
+# ROS 2 launch 파일 디버깅
+
+## 1. 패키지 및 launch 파일 확인
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+ros2 pkg prefix {{package_name}} 2>/dev/null || echo "패키지를 찾을 수 없습니다"
+echo ""
+echo "=== launch 파일 목록 ==="
+find $(ros2 pkg prefix {{package_name}} 2>/dev/null)/share/{{package_name}}/launch -type f 2>/dev/null || echo "launch 디렉토리 없음"
+```
+
+## 2. launch 파일 구문 검사
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+ros2 launch {{package_name}} {{launch_file}} --print-description 2>&1 || echo "launch 파일 파싱 실패"
+```
+
+## 3. launch 실행 (디버그 모드)
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+timeout 15 ros2 launch {{package_name}} {{launch_file}} --debug 2>&1 | head -100 || echo "launch 종료"
+```
+
+## 4. 노드 및 토픽 상태 확인
+
+```sh run
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+echo "=== 실행 중인 노드 ==="
+ros2 node list 2>/dev/null
+echo ""
+echo "=== 활성 토픽 ==="
+ros2 topic list -t 2>/dev/null
+echo ""
+echo "=== 서비스 목록 ==="
+ros2 service list 2>/dev/null | head -20
+```
+
+## 5. 검증
+
+```verify expect=0
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash && ros2 pkg prefix {{package_name}} > /dev/null 2>&1 && echo 0 || echo 1
+```
+
+## 6. AI 분석
+
+```ai
+ROS 2 launch 파일 {{package_name}}/{{launch_file}} 디버깅 결과를 분석해 주세요. 노드 실행 상태, 토픽 연결 그래프, 에러 로그를 확인하고, 일반적인 launch 실패 원인(의존성 누락, 파라미터 오류, 네임스페이스 충돌)과 해결 방법을 제안해 주세요.
+```
