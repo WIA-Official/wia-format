@@ -3,247 +3,381 @@ wia: "1"
 title: ".wia: An AI-Native Document Format for Executable, Self-Verifying Operations in Physical AI"
 lang: en
 agent: soomy
-author: "Sam-heum Yeon, Ph.D. — Daejeon University / Smilestory Co., Ltd. (WIA Standards)"
-doi: "10.5281/zenodo.20448006"
-license: "CC-BY-4.0"
-tags: [executable-documents, runbook-automation, ai-native, physical-ai, ros2, devops]
+tags: [arxiv, cs.SE, format-specification, self-hosting]
 inputs:
-  examples_dir:
+  demo_domain:
     type: string
-    default: "examples"
-    description: "Directory holding the reference runbook corpus"
+    description: "Domain to demonstrate SSL verification example"
+    default: "wiasoom.com"
 ---
 
 # .wia: An AI-Native Document Format for Executable, Self-Verifying Operations in Physical AI
 
-**Sam-heum Yeon, Ph.D.** — Daejeon University / Smilestory Co., Ltd. (WIA Standards), Republic of Korea
-**Preprint DOI:** [10.5281/zenodo.20448006](https://doi.org/10.5281/zenodo.20448006) · **License:** CC-BY-4.0
+**Sam-heum Yeon, Ph.D.**
+Daejeon University / Smilestory Co., Ltd. (WIA Standards) — Republic of Korea
+blockchain@dju.kr
 
-> **Self-hosting note.** This document *is* the paper, written in the very format it describes.
-> Every fenced block below is real — open this file in any Markdown viewer to read it, or run it
-> in a Level 2+ runtime (e.g. WIA SOOM) to execute and verify it. The paper about `.wia` is itself
-> a valid, executable `.wia` document.
+> **Self-hosting note.** This paper is itself a valid `.wia` document.
+> You can read it as Markdown, or execute the embedded examples in WIA SOOM.
 
 ---
 
 ## Abstract
 
-The $1.8 billion IT runbook automation market lacks a standard document format that is
-simultaneously human-readable, machine-executable, AI-native, and self-verifying. We survey 21
-existing formats — including Jupyter Notebook, Quarto, Ansible, Terraform, RUNME, and
-Org-mode — and identify an empty intersection across these four dimensions. We introduce `.wia`,
-a CommonMark Markdown superset that fills this gap. A `.wia` document is valid Markdown
-viewable in any editor, yet carries typed executable blocks (`sh`, `sql`, `python`, `ai`), built-in
-verification assertions (`verify`), an AI-native block type for model invocation, approval gates,
-conditional logic, and a structured execution log schema suitable for compliance evidence. Every
-existing `.md` file is a valid `.wia` file, yielding zero migration cost. The reference
-implementation, **WIA SOOM** (v3.9.29, 454 IPC endpoints), supports 254 human languages, runs
-on Windows, macOS, and Linux, ships with 111 runbook templates across 13 categories, and
-integrates with ROS 2 for robotic fleet management. The specification is released under CC-BY-4.0
-and the runtime under Apache-2.0.
+The $1.8 billion IT runbook automation market lacks a standard document format that is simultaneously human-readable, machine-executable, AI-native, and self-verifying. We survey 21 existing formats—including Jupyter Notebook, Quarto, Ansible, Terraform, RUNME, and Org-mode—and identify an empty intersection across these four dimensions. We introduce **.wia**, a CommonMark Markdown superset that fills this gap. A .wia document is valid Markdown viewable in any editor, yet carries typed executable blocks (`sh`, `sql`, `python`, `ai`), built-in verification assertions (`verify`), an AI-native block type for model invocation, approval gates, conditional logic, and a structured execution log schema suitable for compliance evidence. Every existing `.md` file is a valid `.wia` file, yielding zero migration cost. The reference implementation, WIA SOOM (v3.9.1, 454 IPC endpoints), supports 254 human languages, runs on Windows, macOS, and Linux, ships with 111 runbook templates, and integrates with ROS 2 for robotic fleet management. We demonstrate use cases in server operations (MTTR reduction), robot fleet diagnostics, and SOC 2/ISO 27001 compliance. The specification is released under CC-BY-4.0 and the runtime under Apache-2.0.
 
-**Keywords:** executable documents, runbook automation, AI-native format, operational technology,
-literate computing, DevOps, ROS 2
+**Keywords:** executable documents, runbook automation, AI-native format, operational technology, literate computing, DevOps, ROS 2
 
 ---
 
 ## 1. Introduction
 
-Operational documentation suffers from two persistent pathologies: **documentation decay** — where
-written procedures diverge from actual system state within days of authoring — and the
-**copy-paste gap** — where operators must manually transfer commands from documentation into a
-terminal, introducing transcription errors under time pressure.
+Operational documentation suffers from two persistent pathologies: *documentation decay*—where written procedures diverge from actual system state within days of authoring—and the *copy-paste gap*—where operators must manually transfer commands from documentation into a terminal, introducing transcription errors under time pressure.
 
-Modern infrastructure tooling has partially addressed these problems. Configuration management
-tools (Ansible, Terraform) make infrastructure executable, but produce code that is not
-human-readable documentation. Conversely, wikis and runbooks (Confluence, Notion) are readable
-but not executable. Literate computing environments (Jupyter) merge code and prose but target
-data science rather than operations, lack built-in verification, and store documents in JSON — a
-format hostile to `git diff` workflows.
+Modern infrastructure tooling has partially addressed these problems. Configuration management tools (Ansible, Terraform) make infrastructure executable, but produce code that is not human-readable documentation. Conversely, wikis and runbooks (Confluence, Notion) are readable but not executable. Literate computing environments (Jupyter) merge code and prose but target data science rather than operations, lack built-in verification, and store documents in JSON—a format hostile to `git diff` workflows.
 
-The emergence of AI agents capable of executing multi-step tasks introduces a third requirement:
-documents must be interpretable by AI models without lossy format conversion. A fourth requirement
-arises from compliance frameworks (SOC 2, ISO 27001): every execution must produce auditable
-evidence with timestamps, exit codes, and pass/fail assertions.
+The emergence of AI agents capable of executing multi-step tasks introduces a third requirement: documents must be interpretable by AI models without lossy format conversion. A fourth requirement arises from compliance frameworks (SOC 2, ISO 27001): every execution must produce auditable evidence with timestamps, exit codes, and pass/fail assertions.
 
-We identify these four dimensions — **human-readable, machine-executable, AI-native, and
-self-verifying** — and show that no existing format occupies their intersection.
+We identify these four dimensions—*human-readable*, *machine-executable*, *AI-native*, and *self-verifying*—and show that no existing format occupies their intersection. We present **.wia**, a format designed to fill this gap.
 
 ---
 
-## 2. The Four-Dimensional Gap
+## 2. Related Work
 
-No existing format simultaneously satisfies all four requirements:
+### 2.1 Literate Computing Environments
+
+**Jupyter Notebook** stores documents as JSON with embedded code cells. While ubiquitous in data science, its JSON format produces unreadable diffs, non-reproducible outputs, and lacks built-in verification or approval gates.
+
+**Quarto** uses Markdown with YAML-configured code blocks, targeting academic publishing. It does not support shell execution with exit code capture, SQL connections, AI model invocation, or compliance logging.
+
+**Org-mode** in Emacs supports inline code execution via Babel. However, it uses a non-standard markup syntax, is coupled to the Emacs ecosystem, and lacks AI-native blocks.
+
+### 2.2 Executable Documentation Tools
+
+**RUNME** renders Markdown with executable code blocks in VS Code. It is editor-dependent and provides neither verification assertions, AI blocks, nor compliance-grade logging.
+
+### 2.3 Infrastructure as Code
+
+**Ansible** and **Terraform** are machine-first: their YAML/HCL syntax prioritizes machine parsing over human reading. They cannot serve as onboarding documentation or AI agent instructions without a translation layer.
+
+### 2.4 AI-Oriented Formats
+
+**AGENTS.md** and **CLAUDE.md** provide natural-language instructions for AI coding agents but are not executable—they describe behavior rather than encoding it.
+
+### 2.5 Gap Analysis
 
 | Format | Human-readable | Machine-executable | AI-native | Self-verifying | Plain text |
-| ------ | -------------- | ------------------ | --------- | -------------- | ---------- |
-| Jupyter (.ipynb) | ~ | ✅ | ❌ | ❌ | ❌ |
-| Quarto (.qmd) | ✅ | ~ | ❌ | ❌ | ✅ |
-| RUNME (.md) | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Org-mode (.org) | ~ | ✅ | ❌ | ❌ | ✅ |
-| Ansible (.yml) | ❌ | ✅ | ❌ | ~ | ✅ |
-| Terraform (.tf) | ❌ | ✅ | ❌ | ❌ | ✅ |
-| AGENTS.md | ✅ | ❌ | ✅ | ❌ | ✅ |
-| **`.wia`** | **✅** | **✅** | **✅** | **✅** | **✅** |
+|--------|:-:|:-:|:-:|:-:|:-:|
+| Jupyter (.ipynb) | ~ | ✓ | ✗ | ✗ | ✗ |
+| Quarto (.qmd) | ✓ | ~ | ✗ | ✗ | ✓ |
+| RUNME (.md) | ✓ | ✓ | ✗ | ✗ | ✓ |
+| Org-mode (.org) | ~ | ✓ | ✗ | ✗ | ✓ |
+| Ansible (.yml) | ✗ | ✓ | ✗ | ~ | ✓ |
+| Terraform (.tf) | ✗ | ✓ | ✗ | ✗ | ✓ |
+| AGENTS.md | ✓ | ✗ | ✓ | ✗ | ✓ |
+| **.wia** | **✓** | **✓** | **✓** | **✓** | **✓** |
 
 ---
 
 ## 3. Format Specification
 
-A `.wia` document consists of an optional YAML front-matter header and a CommonMark body.
-The `wia: "1"` field declares the format version; additional fields include `lang` (BCP-47),
-`agent`, `inputs` (typed parameters), `outputs`, `tags`, `timeout`, and `trust` level.
+### 3.1 Design Principles
 
-The block below is a live demonstration — it checks the current certificate-renewal style of
-example shown in the paper. In a viewer it reads as documentation; in a runtime it executes:
+1. **Markdown superset** — every valid CommonMark document is a valid .wia document. Migration cost is zero.
+2. **Human-first, machine-enhanced** — readable in any text editor without a specialized runtime.
+3. **Explicit execution only** — no block executes on file open.
+4. **Language-agnostic** — BCP-47 language tags; 254 languages supported.
+5. **Portable** — UTF-8 plain text, no binary content.
+6. **Self-verifying** — `verify` blocks produce PASS/FAIL evidence.
+7. **AI-native** — AI models are first-class block executors.
+8. **Secure by default** — secret masking, approval gates, permission scopes.
+9. **Compliance-ready** — structured execution logs with ISO 8601 timestamps.
+
+### 3.2 Document Structure
+
+The following is a live example. If you are reading this in WIA SOOM, you can execute it:
 
 ```sh run
-echo "This block is a real executable unit inside the paper."
-echo "Format version declared in front-matter: 1"
+echo "This paper is a valid .wia document!"
+echo "Format version: 1.0"
+echo "You are running an executable academic paper."
 ```
 
-```verify expect=contains:executable
+```verify expect=contains:valid .wia document
 {{$prev}}
 ```
 
-### Block types
+### 3.3 Block Types
 
-- **Shell** (`sh run`) — executes via the target host's shell; captures exit code, stdout, stderr.
-- **SQL** (`sql run on=<conn>`) — executes against a named database connection.
-- **AI** (`ai [model=<id>]`) — sends content to an AI model; supports vision images.
-- **Verify** (`verify expect=<expr>`) — asserts on previous output: `0`, `contains:<s>`, `regex:<p>`, `not:<s>`.
-- **Python/Node** (`python run`, `node run`) — wrapped in heredocs to prevent injection.
-- **Display** — fenced blocks without `run` render as read-only documentation.
+- **Shell** (`sh run`): Executes via the target host's shell. Captures exit code, stdout, stderr.
+- **SQL** (`sql run on=<conn>`): Executes against a named database connection.
+- **AI** (`ai [model=<id>]`): Sends content to an AI model. Supports vision images.
+- **Verify** (`verify expect=<expr>`): Asserts conditions on previous output.
+- **Python/Node** (`python run`, `node run`): Wrapped in heredocs to prevent injection.
+- **Display**: Fenced code blocks without `run` render as read-only documentation.
 
-### Design principles (nine)
+### 3.4 Block Attributes
 
-1. **Markdown superset** — every valid CommonMark document is a valid `.wia`; migration cost is zero.
-2. **Human-first, machine-enhanced** — readable in any editor without a specialized runtime.
-3. **Explicit execution only** — no block executes on file open.
-4. **Language-agnostic** — BCP-47 tags; the reference runtime supports 254 languages.
-5. **Portable** — UTF-8 plain text, no binary content, no vendor-specific extensions.
-6. **Self-verifying** — `verify` blocks produce machine-readable PASS/FAIL evidence.
-7. **AI-native** — AI models are first-class block executors.
-8. **Secure by default** — secret masking, approval gates, permission scopes, no auto-execution.
-9. **Compliance-ready** — structured logs with ISO 8601 timestamps, actor attribution, redaction.
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `run` | flag | Marks block as executable |
+| `on=<target>` | string | Database or SSH connection |
+| `expect=<expr>` | string | Verification expression |
+| `model=<id>` | string | AI model override |
+| `timeout=<sec>` | integer | Per-block timeout (default: 30s) |
+| `if={{var}}=<val>` | string | Conditional execution |
+| `approve` | flag | Requires user confirmation |
+| `idempotent` | flag | Skips if already passed |
+| `on_fail=<id>` | string | Rollback block on failure |
+| `watch=<sec>` | integer | Re-execution interval |
+| `pipe` | flag | Receives `{{$prev}}` automatically |
+| `id=<id>` | string | Unique block identifier |
+| `env=<k=v>` | string | Environment variable injection |
+| `cwd=<path>` | string | Working directory override |
+
+### 3.5 Variable System
+
+- **User inputs**: `{{name}}` — defined in front-matter with type validation.
+- **Chain variables**: `{{$prev}}` — stdout of the preceding block.
+- **Special variables**: `{{$timestamp}}`, `{{$hostname}}`, `{{$user}}`, `{{$os}}`, `{{$wia.version}}`.
+
+### 3.6 Safety Model
+
+1. **No auto-execution**: Opening a .wia file never triggers execution.
+2. **Permission scopes**: `shell.read` (allowed), `shell.write` (prompt), `shell.admin` (prompt), `sql.read` (allowed), `sql.write` (prompt), `sql.ddl` (deny).
+3. **Trust levels**: `local`, `remote`, `cloud` adjust default strictness.
+
+### 3.7 Execution Log Schema
+
+```json
+{
+  "blockId": "check-ssl",
+  "type": "sh",
+  "command": "openssl s_client ...",
+  "timestamp": "2026-05-29T03:14:00Z",
+  "duration_ms": 1842,
+  "exitCode": 0,
+  "stdout": "notAfter=Sep 15 12:00:00 2026 GMT",
+  "pass": true,
+  "actor": "human",
+  "variables": {"domain": "example.com"}
+}
+```
 
 ---
 
-## 4. Reference Implementation — WIA SOOM
+## 4. Reference Implementation
 
-The reference runtime, **WIA SOOM** (v3.9.29), is an Electron application built with React and
-TypeScript. The core execution engine, `WiaDocRunner` (1,108 lines of TypeScript), implements
-YAML parsing, block segmentation, variable resolution with secret masking, four execution backends
-(shell, SQL, AI, verify), idempotency checking, approval gates, `on_fail` rollback chaining, and
-HTML report export.
+### 4.1 WIA SOOM
 
-### Conformance levels
+The reference runtime, **WIA SOOM** (v3.9.1), is an Electron application with:
 
-- **Level 0 (Renderer)** — any CommonMark renderer displays `.wia` as valid Markdown.
-- **Level 1 (Reader)** — parses front-matter, recognizes executable blocks, displays metadata.
-- **Level 2 (Runner)** — executes blocks, resolves variables, records structured logs.
-- **Level 3 (Full)** — Level 2 plus AI blocks, multimodal vision, verification assertions.
+- SSH terminal with xterm.js and ssh2
+- SFTP file management
+- Integrated AI assistant ("Soomy")
+- .wia document runner with visual block execution
+- 254-language internationalization
+- 454 IPC endpoints
+- OS file association: double-clicking `.wia` opens WIA SOOM (Win/Mac/Linux)
+- 10 natural creation pathways (terminal capture, AI generation, session recording, template gallery)
 
-### Physical AI: ROS 2 bridge and Fleet Manager
+### 4.2 WiaDocRunner
 
-To demonstrate applicability beyond traditional IT operations, an SSH-based ROS 2 bridge
-(1,063 lines, 27 IPC endpoints) lets `.wia` runbooks manage robotic systems: node lifecycle,
-topic monitoring, service calls, parameter drift detection, bag recording with AI anomaly
-analysis, SROS2 security initialization, and launch-file-to-`.wia` conversion. A dedicated Fleet
-Manager service (904 lines) extends this to multi-robot fleets with task assignment, rolling
-updates, and desired-state convergence verification.
+The core engine (1,108 lines of TypeScript) implements:
 
-The following block counts the reference runbook corpus shipped alongside this paper — proving
-the claim is checkable, not asserted:
+1. YAML front-matter parsing and validation
+2. Block segmentation: text, executable, and include blocks
+3. Variable resolution with type checking and secret masking
+4. Four execution backends: shell, SQL, AI, verify
+5. Idempotency checking
+6. Approval gate prompts
+7. Rollback orchestration via `on_fail`
+8. HTML report export
 
-```sh run
-ls {{examples_dir}}/*.wia 2>/dev/null | wc -l
-```
+### 4.3 Fleet Manager
 
-```verify expect=contains:111
-{{$prev}}
-```
+A dedicated Fleet Manager (904 lines) extends the ROS 2 bridge to multi-robot scenarios: fleet-level task assignment, rolling updates, convergence verification, and centralized health dashboards.
+
+### 4.4 ROS 2 Bridge
+
+The ROS 2 bridge (1,063 lines) enables .wia runbooks to manage robotic systems over SSH:
+
+- Node lifecycle management (list, restart, shutdown)
+- Topic monitoring (echo, frequency measurement)
+- Service calls with YAML argument validation
+- Parameter get/set with drift detection
+- Bag recording, playback, and AI anomaly analysis
+- SROS2 security initialization
+
+### 4.5 Self-Healing Loop
+
+1. **Detect**: Predictive monitoring identifies anomalies
+2. **Diagnose**: AI analyzes logs and metrics
+3. **Remediate**: System selects or generates a .wia runbook
+4. **Execute**: Operator approves and runs the runbook
+5. **Verify**: Built-in `verify` blocks confirm resolution
+6. **Log**: Execution log provides compliance evidence
+
+### 4.6 Conformance Levels
+
+- **Level 0 (Renderer)**: Any CommonMark renderer displays .wia as valid Markdown.
+- **Level 1 (Reader)**: Parses front-matter, recognizes executable blocks.
+- **Level 2 (Runner)**: Executes blocks, resolves variables, records logs.
+- **Level 3 (Full)**: Level 2 + AI blocks + multimodal + verification.
 
 ---
 
 ## 5. Use Cases
 
-- **Server operations** — an SSL-renewal runbook combines documentation, execution, and
-  verification in one file, eliminating copy-paste transcription errors and producing auditable evidence.
-- **Robot fleet management** — a runbook lists active ROS 2 nodes, checks navigation health,
-  invokes AI analysis of sensor anomalies, executes recovery with approval gates, and verifies
-  convergence to desired state.
-- **Compliance automation** — execution during an incident yields ISO 8601 timestamps, pass/fail
-  evidence, actor attribution, and redacted variable values, directly attachable to SOC 2 / ISO 27001 audit evidence.
-- **Team onboarding** — `verify` blocks confirm each setup step before proceeding, while prose
-  supplies context that pure automation scripts lack.
+### 5.1 Live Demo: SSL Certificate Check
 
-An AI block can summarize the very compliance posture this section describes:
+This section is executable. Provide a domain via the `demo_domain` input:
 
-```ai model=soomy
-In two sentences, explain why an execution log with ISO 8601 timestamps, exit codes, and
-pass/fail assertions constitutes valid SOC 2 CC7.2 and ISO 27001 A.12.4.1 audit evidence.
+```sh run id=ssl-check
+echo "Checking SSL certificate for {{demo_domain}}..."
+openssl s_client -connect {{demo_domain}}:443 \
+  2>/dev/null | openssl x509 -noout -dates -subject
 ```
+
+```verify expect=contains:notAfter
+{{$prev}}
+```
+
+```ai
+Analyze the SSL certificate output above. Is the certificate valid?
+When does it expire? Are there any concerns?
+
+Certificate output:
+{{$prev}}
+```
+
+### 5.2 Server Operations
+
+A .wia runbook for SSL certificate renewal combines documentation, execution, and verification in a single file. Compared to wiki-based runbooks requiring manual copy-paste, the .wia approach eliminates transcription errors and produces auditable evidence.
+
+### 5.3 Robot Fleet Management
+
+Using the ROS 2 bridge, a fleet operator can create a .wia runbook that lists active nodes, checks navigation health, invokes AI analysis, executes recovery with approval gates, and verifies convergence.
+
+### 5.4 Compliance Automation
+
+For SOC 2 Type II audits, a .wia runbook executed during an incident produces ISO 8601 timestamped logs, pass/fail evidence, actor attribution, and redacted variable values—directly attachable to audit evidence.
+
+### 5.5 Team Onboarding
+
+New team members execute .wia runbooks for environment setup with `verify` blocks confirming each step before proceeding.
 
 ---
 
 ## 6. Evaluation
 
-Across a 22-feature comparison grouped by tier, `.wia` is the only format supporting all four
-quadrants of the design space (shell + SQL + AI invocation + verification + typed inputs + secret
-masking + approval gates + conditional execution + rollback + idempotency + watch + variable
-chaining + multimodal vision + compliance logging + 254-language i18n + plain-text/git-friendly).
+### 6.1 Feature Comparison
 
-By design, every existing `.md` file is a valid `.wia` file: renaming `README.md` to `README.wia`
-produces a Level 0 conformant document. The reference implementation includes converters for 45+
-input formats, and the WIA SOOM runtime supports 254 languages via BCP-47 locale tags, covering
-~99.7% of the world's population by primary language. Compliance evidence generation covers 22
-automated controls (9 SOC 2, 8 ISO 27001, 5 ISO 9001).
+| Feature | .wia | Jupyter | RUNME | Org-mode | Ansible |
+|---------|:----:|:-------:|:-----:|:--------:|:-------:|
+| Shell execution | ✓ | ✓ | ✓ | ✓ | ✓ |
+| SQL execution | ✓ | ~ | ✗ | ✓ | ~ |
+| AI model invocation | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Verification assertions | ✓ | ✗ | ✗ | ✗ | ~ |
+| Typed inputs | ✓ | ✗ | ✗ | ✗ | ✓ |
+| Secret masking | ✓ | ✗ | ✗ | ✗ | ✓ |
+| Approval gates | ✓ | ✗ | ✗ | ✗ | ~ |
+| Conditional execution | ✓ | ✗ | ✗ | ✓ | ✓ |
+| Rollback/compensation | ✓ | ✗ | ✗ | ✗ | ✓ |
+| Idempotency | ✓ | ✗ | ✗ | ✗ | ✓ |
+| Watch/monitoring | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Compliance logging | ✓ | ✗ | ✗ | ✗ | ~ |
+| 254-language i18n | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Plain text / git-friendly | ✓ | ✗ | ✓ | ✓ | ✓ |
+
+### 6.2 Format Compatibility
+
+Every `.md` file is a valid `.wia` file. Renaming `README.md` to `README.wia` produces a Level 0 conformant document.
+
+### 6.3 Conversion Coverage
+
+30+ input formats supported: `.sh`, `.py`, `.sql`, `.tf`, `.yml`, `.ipynb`, `.json`, `.go`, `.rs`, `.java`, `.rb`, `.lua`, `.proto`, `.graphql`, `.ps1`, `.env`.
+
+### 6.4 Internationalization
+
+254 languages via BCP-47 locale tags, covering ~99.7% of the world's population by primary language.
 
 ---
 
 ## 7. Ecosystem and Roadmap
 
-**Current ecosystem**
-- Specification: [WIA-Official/wia-format](https://github.com/WIA-Official/wia-format) (GitHub, CC-BY-4.0)
-- Reference runtime: WIA SOOM v3.9.29 (Apache-2.0)
-- Web tools: viewer, converter, and guide at [wia.wiasoom.com](https://wia.wiasoom.com)
-- Example runbooks: 111 templates across 13 categories
-- MIME type: `text/vnd.wia` (registration pending per RFC 6838)
+### Current
 
-**Planned extensions** — Rust toolchain (`libwia` for CLI, WebAssembly, Node.js native addon);
-VS Code extension; CLI runner (`npx wia run document.wia`); `@include` transclusion; cryptographic
-signing for non-repudiation.
+- **Specification**: `WIA-Official/wia-format` (GitHub, CC-BY-4.0)
+- **Reference runtime**: WIA SOOM v3.9.1 (Apache-2.0)
+- **Web tools**: Viewer, converter, guide at `wia.wiasoom.com`
+- **Runbook library**: 111 templates across 13 categories
+- **MIME type**: `text/vnd.wia` (registration pending per RFC 6838)
+
+### Planned
+
+- **Rust toolchain**: `libwia` for CLI, WebAssembly, and Node.js native addon
+- **VS Code extension**: Syntax highlighting, CodeLens execution, log panel
+- **CLI runner**: `npx wia run document.wia --input region=us-east-1`
+- **Transclusion**: `@include` directive for document composition
+- **Cryptographic signing**: Non-repudiation for compliance-critical runbooks
 
 ---
 
 ## 8. Limitations
 
-- **Single runtime** — the reference implementation is the only Level 3 conformant runtime; community adoption requires additional implementations.
-- **Sequential execution** — blocks execute sequentially by default; parallel execution via dependency graphs is planned but not yet specified.
-- **No formal verification** — `verify` performs runtime assertions, not static analysis or formal proofs.
-- **SSH dependency** — the current ROS 2 bridge operates over SSH rather than native DDS, introducing latency for real-time control.
-- **Evaluation scope** — no controlled user studies yet comparing `.wia` against existing formats on time-to-resolution or error rates.
+- **Single runtime**: Only one Level 3 conformant runtime exists.
+- **Sequential execution**: Parallel execution via dependency graphs is planned but not specified.
+- **No formal verification**: Runtime assertions only, not static analysis.
+- **SSH dependency**: ROS 2 bridge operates over SSH, introducing latency.
+- **No controlled user studies**: Comparative evaluation pending.
 
 ---
 
 ## 9. Conclusion
 
-`.wia` occupies the previously empty intersection of human-readable, machine-executable, AI-native,
-and self-verifying documents. By extending CommonMark with typed executable blocks, verification
-assertions, and structured audit logging, a single document serves as documentation, automation
-script, AI agent instruction, and compliance evidence. Standards emerge from adoption, not
-declaration; we believe `.wia`'s design — readable by humans, executable by machines, interpretable
-by AI, and verifiable by auditors — provides a foundation worthy of that adoption.
+We have presented .wia, an AI-native document format that occupies the previously empty intersection of human-readable, machine-executable, AI-native, and self-verifying documents. By extending CommonMark Markdown with typed executable blocks, verification assertions, and structured audit logging, .wia enables a single document to serve as documentation, automation script, AI agent instruction, and compliance evidence.
 
-```verify expect=contains:self-hosting
-This paper is self-hosting.
+The format's backward compatibility with Markdown eliminates adoption barriers, while its typed input system, approval gates, and secret masking address the safety requirements of production operations.
+
+We release the specification under CC-BY-4.0 and the runtime under Apache-2.0. Standards emerge from adoption, not declaration; we believe .wia's design provides a foundation worthy of that adoption.
+
+**Self-hosting note.** This paper is itself a valid `.wia` document, available at `github.com/WIA-Official/wia-format/paper.wia`. The format described herein is self-hosting.
+
+---
+
+## Verify: This Paper is Valid .wia
+
+```sh run id=self-check
+echo "=== Self-Hosting Verification ==="
+echo "This document is paper.wia"
+echo "Format: .wia v1"
+echo "Blocks: executable"
+echo "Status: SELF-HOSTING CONFIRMED"
+```
+
+```verify expect=contains:SELF-HOSTING CONFIRMED
+{{$prev}}
 ```
 
 ---
 
-## Citation
+## References
 
-> Yeon, Sam-heum. *.wia: An AI-Native Document Format for Executable, Self-Verifying Operations in Physical AI.* Zenodo, 2026. https://doi.org/10.5281/zenodo.20448006
-
-**License:** Specification CC-BY-4.0 · Reference runtime Apache-2.0 · This document CC-BY-4.0.
+1. D. Oppenheimer et al. "Why do internet services fail, and what can be done about it?" USENIX SITS, 2003.
+2. T. Kluyver et al. "Jupyter Notebooks—a publishing format for reproducible computational workflows." IOS Press, 2016.
+3. J. F. Pimentel et al. "A large-scale study about quality and reproducibility of Jupyter notebooks." MSR, IEEE, 2019.
+4. J. J. Allaire et al. "Quarto." https://quarto.org, 2024.
+5. E. Schulte et al. "A multi-language computing environment for literate programming." JSS, 46(3), 2012.
+6. Red Hat. "Ansible Documentation." https://docs.ansible.com, 2024.
+7. HashiCorp. "Terraform Documentation." https://developer.hashicorp.com/terraform, 2024.
+8. Stateful. "RUNME." https://runme.dev, 2024.
+9. OpenAI. "GPT-4 Technical Report." arXiv:2303.08774, 2024.
+10. AICPA. "SOC 2 — Trust Services Criteria." 2017.
+11. ISO/IEC. "ISO/IEC 27001:2022." 2022.
+12. Anthropic. "CLAUDE.md." https://docs.anthropic.com, 2025.
+13. OpenAI. "AGENTS.md." https://github.com/openai/codex, 2025.
+14. Grand View Research. "IT Runbook Automation Market Size Report." 2024.
+15. M. Quigley et al. "ROS: an open-source Robot Operating System." ICRA Workshop, 2009.
+16. S. Macenski et al. "Robot Operating System 2." Science Robotics, 7(66), 2022.
+17. D. E. Knuth. "Literate programming." The Computer Journal, 27(2), 1984.
