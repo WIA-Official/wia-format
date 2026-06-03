@@ -1,6 +1,6 @@
 # `.wia` — The AI-Native Document Format
 
-**Read in:** English · [한국어](README.ko.md) · 中文 *(soon)* · 日本語 *(soon)* · Español *(soon)* · العربية *(soon)*
+**Read in:** English · [한국어](README.ko.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · [العربية](README.ar.md)
 
 > **Humans write. AI executes. Machines verify. Robots converge.**
 

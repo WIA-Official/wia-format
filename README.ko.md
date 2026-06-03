@@ -1,6 +1,6 @@
 # `.wia` — AI 네이티브 문서 포맷
 
-**언어:** [English](README.md) · 한국어 · 中文 *(준비 중)* · 日本語 *(준비 중)* · Español *(준비 중)* · العربية *(준비 중)*
+**언어:** [English](README.md) · 한국어 · [中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · [العربية](README.ar.md)
 
 > **사람이 쓰고, AI가 실행하고, 기계가 검증하고, 로봇이 수렴한다.**
 
