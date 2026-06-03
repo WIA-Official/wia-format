@@ -2,6 +2,8 @@
 
 **Read in:** English · [한국어](README.ko.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · [العربية](README.ar.md)
 
+[![Paper DOI](https://img.shields.io/badge/Paper%20DOI-10.5281%2Fzenodo.20448006-blue)](https://doi.org/10.5281/zenodo.20448006) [![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20523453.svg)](https://doi.org/10.5281/zenodo.20523453) [![License: CC-BY-4.0](https://img.shields.io/badge/Spec-CC--BY--4.0-green)](https://creativecommons.org/licenses/by/4.0/)
+
 > **Humans write. AI executes. Machines verify. Robots converge.**
 
 `.wia` is a Markdown superset. Every `.md` is a valid `.wia`.
@@ -133,6 +135,7 @@ The [`examples/`](examples) directory contains **111 production-ready runbooks**
 | **[Spec v1](SPEC-v1.md)** | Formal specification (19 sections) | ✅ Published |
 | **[111 Runbooks](examples)** | Production-ready templates | ✅ Available |
 | **[Paper (Zenodo)](https://doi.org/10.5281/zenodo.20448006)** | Peer-citable preprint + DOI (CC-BY 4.0) | ✅ Published |
+| **[Software archive (Zenodo)](https://doi.org/10.5281/zenodo.20523453)** | Versioned repo snapshot + concept DOI | ✅ v1.0.0 |
 | **[wia.wiasoom.com](https://wia.wiasoom.com)** | Format landing page | ✅ Live |
 | **[Converter](https://wia.wiasoom.com/convert.html)** | 45+ formats → .wia | ✅ Live |
 | **[Viewer](https://wia.wiasoom.com/view.html)** | Read .wia without install | ✅ Live |
